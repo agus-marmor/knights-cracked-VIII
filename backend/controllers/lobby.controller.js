@@ -2,6 +2,10 @@
 import crypto from "crypto";
 import Lobby from "../models/Lobby.js";
 
+import { publicLobbyView } from "../utils/lobby.view.js";
+import { emitLobbySnapshot } from "../realtime/lobby.emit.js"; // already importing elsewhere
+
+
 const VALID_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no confusing O/0/I/1
 const CODE_LEN = 5;
 
@@ -35,12 +39,17 @@ export async function createLobby(req, res) {
           userId: req.user.id,
           username: req.user.username,
           character,
-          ready: false
+          ready: false,
+          joinedAt: new Date(),
+          lastSeenAt: new Date()
         }
       ],
       // auto-expire in 2 hours
       expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000)
     });
+
+    // emit with the actual code
+    await emitLobbySnapshot(lobby.code);
 
     return res.json({ code: lobby.code });
   } catch (err) {
@@ -51,23 +60,43 @@ export async function createLobby(req, res) {
 
 export async function getLobby(req, res) {
   const { code } = req.params;
-  const lobby = await Lobby.findOne({ code: code.toUpperCase() });
+  const lobby = await Lobby.findOne({ code: code.toUpperCase() }).lean();
   if (!lobby) return res.status(404).json({ message: "Lobby not found" });
-  return res.json(lobby);
+  return res.json(publicLobbyView(lobby));
 }
 
-// Atomic join: checks status=open, capacity, and not already joined
 export async function joinLobby(req, res) {
   try {
     const { code } = req.params;
-    const { character } = req.body || {};
-    if (!isValidCharacter(character)) {
-      return res.status(400).json({ message: "character must be 'mech' or 'kaiju'." });
+    const upCode = code.toUpperCase();
+
+    // 1) Load lobby to see host's character
+    const lobby = await Lobby.findOne({ code: upCode, status: "open" }).lean();
+    if (!lobby) return res.status(400).json({ message: "Invalid or closed lobby." });
+
+    // Already joined?
+    if (lobby.players.some(p => p.userId === req.user.id)) {
+      return res.status(400).json({ message: "Already in this lobby." });
     }
 
+    // Capacity check
+    if (lobby.players.length >= lobby.maxPlayers) {
+      return res.status(400).json({ message: "Lobby is full." });
+    }
+
+    // Find host's character
+    const hostPlayer = lobby.players.find(p => p.userId === lobby.hostUserId);
+    if (!hostPlayer || !hostPlayer.character) {
+      return res.status(400).json({ message: "Host has not selected a character yet." });
+    }
+
+    // 2) Pick the opposite character
+    const character = hostPlayer.character === "mech" ? "kaiju" : "mech";
+
+    // 3) Atomic join with guards (status, capacity, not already in)
     const updated = await Lobby.findOneAndUpdate(
       {
-        code: code.toUpperCase(),
+        code: upCode,
         status: "open",
         $expr: { $lt: [{ $size: "$players" }, "$maxPlayers"] },
         "players.userId": { $ne: req.user.id }
@@ -89,10 +118,14 @@ export async function joinLobby(req, res) {
     );
 
     if (!updated) {
-      return res.status(400).json({ message: "Cannot join (invalid code, full, closed, or already joined)." });
+      // If this fails, someone likely filled or closed the lobby between reads
+      return res.status(400).json({ message: "Cannot join now (full, closed, or race condition). Try again." });
     }
 
-    return res.json({ ok: true });
+    // 5) Live update
+    await emitLobbySnapshot(upCode);
+
+    return res.json({ ok: true, character }); // return assigned character for UI if you want
   } catch (err) {
     console.error("[joinLobby]", err);
     return res.status(500).json({ message: "Join failed" });

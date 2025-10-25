@@ -1,41 +1,82 @@
+// controllers/match.controller.js
 import Match from "../models/Match.js";
+import Lobby from "../models/Lobby.js";
+import { io } from "../realtime/socket.js"; // your initialized socket.io server
+import { choosePrompt } from "../utils/prompt.js"; // return { id, text }
 
-export async function getCurrentMatch(req, res) {
-  const m = await Match.findOne({ lobbyCode: req.params.code }).sort({ createdAt: -1 });
-  if (!m) return res.status(404).json({ message: "No match" });
-  res.json(m);
+export async function createMatchFromLobby(req, res) {
+  const { code } = req.params;
+  const lobby = await Lobby.findOne({ code: code.toUpperCase(), status: "in_progress" });
+  if (!lobby) return res.status(400).json({ message: "Lobby not ready" });
+  if (lobby.hostUserId !== req.user.id) return res.status(403).json({ message: "Host only" });
+
+  const allReady = lobby.players.length >= 2 && lobby.players.every(p => p.ready);
+  if (!allReady) return res.status(400).json({ message: "All players must be ready" });
+
+  const { id: promptId, text: promptText } = await choosePrompt();
+
+  const players = lobby.players.map(p => ({
+    userId: p.userId,
+    username: p.username,
+    wpm: 0, accuracy: 100, charsTyped: 0, errors: 0, finished: false
+  }));
+
+  const match = await Match.create({
+    code: lobby.code,
+    lobbyId: lobby._id,
+    status: "countdown",
+    promptId, promptText,
+    players
+  });
+
+  io.to(`lobby:${lobby.code}`).emit("match:created", { matchId: match._id, code: lobby.code });
+  emitMatchSnapshot(lobby.code, match);
+
+  // 3…2…1… → playing
+  startCountdown(lobby.code, match._id);
+
+  return res.json({ ok: true, matchId: match._id });
 }
 
-export async function submitProgress(req, res) {
-  const { progress, wpm, accuracy } = req.body; // progress in [0,1]
-  const m = await Match.findOne({ lobbyCode: req.params.code }).sort({ createdAt: -1 });
-  if (!m) return res.status(404).json({ message: "No match" });
-
-  const i = m.results.findIndex(r => r.userId === req.user.id);
-  const entry = { userId: req.user.id, name: req.user.name, progress, wpm, accuracy };
-  if (i === -1) m.results.push(entry);
-  else m.results[i] = { ...m.results[i].toObject?.() ?? m.results[i], ...entry };
-
-  await m.save();
-  res.json({ ok: true });
+function emitMatchSnapshot(code, match) {
+  const payload = {
+    status: match.status,
+    promptId: match.promptId,
+    promptText: match.promptText,
+    startedAt: match.startedAt,
+    endedAt: match.endedAt,
+    durationMs: match.durationMs,
+    players: match.players,
+    winnerUserId: match.winnerUserId,
+  };
+  io.to(`match:${code}`).emit("match:snapshot", payload);
 }
 
-export async function finish(req, res) {
-  const { wpm, accuracy } = req.body;
-  const m = await Match.findOne({ lobbyCode: req.params.code }).sort({ createdAt: -1 });
-  if (!m) return res.status(404).json({ message: "No match" });
+async function startCountdown(code, matchId) {
+  let secs = 3;
+  const room = `match:${code}`;
+  const timer = setInterval(async () => {
+    io.to(room).emit("match:countdown", { secs });
+    if (secs-- <= 0) {
+      clearInterval(timer);
+      const match = await Match.findByIdAndUpdate(
+        matchId,
+        { $set: { status: "playing", startedAt: new Date() } },
+        { new: true }
+      );
+      io.to(room).emit("match:started", { startedAt: match.startedAt });
+      emitMatchSnapshot(code, match);
 
-  const i = m.results.findIndex(r => r.userId === req.user.id);
-  const entry = { userId: req.user.id, name: req.user.name, progress: 1, wpm, accuracy, finishedAt: new Date() };
-  if (i === -1) m.results.push(entry); else m.results[i] = { ...m.results[i], ...entry };
-  await m.save();
-
-  res.json({ ok: true });
+      // optional hard timeout (e.g., 120s)
+      setTimeout(() => hardFinish(code, matchId, "timeout"), 120000);
+    }
+  }, 1000);
 }
 
-export async function leaderboard(req, res) {
-  const m = await Match.findOne({ lobbyCode: req.params.code }).sort({ createdAt: -1 });
-  if (!m) return res.status(404).json({ message: "No match" });
-  const sorted = [...m.results].sort((a, b) => (b.wpm ?? 0) - (a.wpm ?? 0));
-  res.json(sorted);
+async function hardFinish(code, matchId, reason) {
+  const match = await Match.findById(matchId);
+  if (!match || match.status === "finished") return;
+  const final = finalizeResult(match, reason);
+  await match.save();
+  io.to(`match:${code}`).emit("match:finished", publicResult(final));
 }
