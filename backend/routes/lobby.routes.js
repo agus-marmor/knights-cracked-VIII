@@ -1,11 +1,19 @@
+// routes/lobby.routes.js
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
-import * as lobby from "../controllers/lobby.controller.js";
+import {
+  createLobby, getLobby, joinLobby, leaveLobby,
+  readyUp, unready, startMatch, kickPlayer, heartbeat
+} from "../controllers/lobby.controller.js";
 
 const r = Router();
-r.post("/", requireAuth, lobby.createLobby);            // POST /api/lobbies
-r.get("/:code", requireAuth, lobby.getLobby);           // GET  /api/lobbies/:code
-r.post("/:code/join", requireAuth, lobby.joinLobby);    // POST /api/lobbies/:code/join
-r.post("/:code/ready", requireAuth, lobby.readyUp);     // POST /api/lobbies/:code/ready
-r.post("/:code/start", requireAuth, lobby.startMatch);  // POST /api/lobbies/:code/start
+r.post("/", requireAuth, createLobby);
+r.get("/:code", requireAuth, getLobby);
+r.post("/:code/join", requireAuth, joinLobby);
+r.post("/:code/leave", requireAuth, leaveLobby);
+r.post("/:code/ready", requireAuth, readyUp);
+r.post("/:code/unready", requireAuth, unready);
+r.post("/:code/start", requireAuth, startMatch);
+r.post("/:code/kick", requireAuth, kickPlayer);
+r.post("/:code/heartbeat", requireAuth, heartbeat);
 export default r;
