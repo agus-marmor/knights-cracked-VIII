@@ -7,6 +7,7 @@ import http from "http";
 import cors from "cors";
 import authRoutes from "./routes/auth.routes.js";
 import lobbyRoutes from "./routes/lobby.routes.js";
+import matchRoutes from "./routes/match.routes.js";
 import { initSocket } from "./socket.js";
 import userRoutes from "./routes/user.routes.js";
 import leaderboardRoutes from "./routes/leaderboard.routes.js";
@@ -40,6 +41,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/lobby", lobbyRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/leaderboard", leaderboardRoutes);
+app.use("/api/matches", matchRoutes)
 
 
 // create HTTP server and attach Socket.IO

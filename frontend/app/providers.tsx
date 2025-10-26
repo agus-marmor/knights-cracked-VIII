@@ -1,15 +1,17 @@
-'use client'; // 1. Mark this as a Client Component
+'use client';
 
 import { HeroUIProvider } from '@heroui/react';
-import { useRouter } from 'next/navigation'; 
+import { useRouter } from 'next/navigation';
+import { AudioProvider } from '@/lib/sfx'; // <-- Add this import
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-
+  
   return (
-    
-    <HeroUIProvider navigate={router.push}> 
-      {children}
-    </HeroUIProvider>
+    <AudioProvider> {/* <-- Wrap with AudioProvider */}
+      <HeroUIProvider navigate={router.push}>
+        {children}
+      </HeroUIProvider>
+    </AudioProvider>
   );
 }

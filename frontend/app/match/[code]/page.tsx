@@ -3,8 +3,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
-import { Button, Textarea, Progress } from "@heroui/react";
+import { Button, Textarea, Progress, Modal, ModalContent, ModalHeader, ModalBody } from "@heroui/react";
 import { getToken, getCurrentUserId } from "@/lib/auth";
+import { getMatchPrompt, } from "@/lib/api";
+import EndGameForm, { EndGameStats } from "@/app/components/EndGameForm"
+
 
 type MatchPlayer = {
   userId: string;
@@ -29,6 +32,7 @@ type MatchSnapshot = {
 };
 
 const SOCKET_SERVER_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
+let accuracy = 0;
 
 // helpers
 function clamp(n: number, min: number, max: number) {
@@ -40,6 +44,19 @@ function countErrors(expected: string, typed: string) {
   return errors;
 }
 
+function calculateWpm(typed: string, startedAt: Date | null) {
+  if (!startedAt) return 0;
+  const chars = typed.length;
+  const minutes = (Date.now() - startedAt.getTime()) / 60000;
+  return minutes > 0 ? Math.round(chars / 5 / minutes) : 0;
+}
+
+function calculateAccuracy(typed: string, prompt: string) {
+  if (!typed.length) return 100;
+  const errors = countErrors(prompt.slice(0, typed.length), typed);
+  return Math.round(Math.max(0, 100 * (1 - errors / typed.length)));
+}
+
 export default function MatchPage() {
   const { code } = useParams<{ code: string }>();
   const search = useSearchParams();
@@ -48,31 +65,38 @@ export default function MatchPage() {
 
   const myUserId = getCurrentUserId();
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [winnerUserId, setWinnerUserId] = useState<string | null | undefined>(null);
+  const [typed, setTyped] = useState<string>("");
+  const [startedAt, setStartedAt] = useState<Date | null>(null);
   const [match, setMatch] = useState<MatchSnapshot | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [startedAt, setStartedAt] = useState<Date | null>(null);
   const [finished, setFinished] = useState(false);
-  const [winnerUserId, setWinnerUserId] = useState<string | null | undefined>(null);
-
-  const [typed, setTyped] = useState<string>("");
-  const [localWpm, setLocalWpm] = useState<number>(0);
-  const [localAcc, setLocalAcc] = useState<number>(100);
 
   const lastEmitRef = useRef<number>(0);
   const THROTTLE_MS = 100;
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const promptScrollRef = useRef<HTMLPreElement>(null);
-  const [prompt, setPrompt] = useState(match?.promptText || "Loading prompt...");
+  const [prompt, setPrompt] = useState("Loading prompt...");
   useEffect(() => {
-    if (!match?.promptText) {
-      fetch('https://random-word-api.herokuapp.com/word?number=50')
-        .then(res => res.json())
-        .then((words: string[]) => setPrompt(words.join(' ')))
-        .catch(() => setPrompt("Failed to load prompt"));
-    } else {
-      setPrompt(match.promptText);
-    }
-  }, [match]);
+    const fetchPrompt = async () => {
+      if (match?.promptText) {
+        setPrompt(match.promptText);
+      } else if (code && !match?.promptText) {
+        try {
+          const data = await getMatchPrompt(code);
+          console.log("Fetched prompt:", data);
+          if (data?.promptText) {
+            setPrompt(data.promptText);
+          }
+        } catch (err) {
+          console.error("Failed to load prompt:", err);
+          setPrompt("Failed to load prompt");
+        }
+      }
+    };
+
+    fetchPrompt();
+  }, [match?.promptText, code]);
   const maxLen = prompt.length;
 
   const me = useMemo(
@@ -99,6 +123,7 @@ export default function MatchPage() {
 
     s.on("match:update", (snapshot: MatchSnapshot) => {
       setMatch(snapshot);
+
       if (snapshot.status === "playing" && snapshot.startedAt) setStartedAt(new Date(snapshot.startedAt));
       if (snapshot.status === "finished") {
         setWinnerUserId(snapshot.winnerUserId);
@@ -126,6 +151,7 @@ export default function MatchPage() {
       setMatch(snapshot);
       setWinnerUserId(snapshot.winnerUserId);
       setFinished(true);
+
     });
 
     return () => {
@@ -135,20 +161,8 @@ export default function MatchPage() {
     };
   }, [code]);
 
-  // local WPM/accuracy
-  useEffect(() => {
-    if (!startedAt) return;
-    const id = setInterval(() => {
-      const elapsedMs = Date.now() - startedAt.getTime();
-      const minutes = elapsedMs / 60000;
-      const gross = minutes > 0 ? typed.length / 5 / minutes : 0;
-      const errors = countErrors(prompt.slice(0, typed.length), typed);
-      const acc = typed.length ? clamp(100 * (1 - errors / typed.length), 0, 100) : 100;
-      setLocalWpm(Math.round(gross));
-      setLocalAcc(Math.round(acc));
-    }, 250);
-    return () => clearInterval(id);
-  }, [startedAt, typed, prompt]);
+
+
 
   const emitProgress = useCallback(
     (nextTyped: string) => {
@@ -169,29 +183,80 @@ export default function MatchPage() {
     [socket, code, maxLen, prompt, startedAt, finished]
   );
 
-  const onType = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value;
-      setTyped(value);
-      emitProgress(value);
+  useEffect(() => {
+    if (!textAreaRef.current || !promptScrollRef.current) return;
 
-      // scroll prompt to cursor
-      if (promptScrollRef.current && textAreaRef.current) {
-        const textarea = textAreaRef.current;
-        const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight || "24");
-        const cursorLine = textarea.value.substr(0, textarea.selectionStart).split("\n").length - 1;
-        promptScrollRef.current.scrollTop = cursorLine * lineHeight;
+    const textarea = textAreaRef.current;
+    const overlay = promptScrollRef.current;
+
+    // Check scroll position frequently to catch automatic scrolling
+    const syncScroll = () => {
+      if (overlay.scrollTop !== textarea.scrollTop) {
+        overlay.scrollTop = textarea.scrollTop;
+      }
+    };
+
+    const intervalId = setInterval(syncScroll, 16); // ~60fps
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  const onType = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = e.target.value;
+
+      if (!startedAt) {
+        setStartedAt(new Date());
+      }
+      // Only allow typing up to the prompt length
+
+
+      setTyped(value);
+      const errors = countErrors(prompt.slice(0, value.length), value);
+      const isFinished = value.length >= maxLen
+      if (isFinished) {
+      }
+
+      socket?.emit("progress:update", {
+        code,
+        charsTyped: value.length,
+        errors,
+        finished: isFinished
+      });
+
+      // Let browser handle textarea scroll naturally, then sync overlay
+      requestAnimationFrame(() => {
+        if (textAreaRef.current && promptScrollRef.current) {
+          promptScrollRef.current.scrollTop = textAreaRef.current.scrollTop;
+        }
+      });
+    },
+    [emitProgress, maxLen]
+  );
+
+
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+
+      if (e.key === 'Enter') {
+        e.preventDefault();
       }
     },
-    [emitProgress]
+    [] // No dependencies
   );
 
   const onLeave = useCallback(() => router.push("/dashboard"), [router]);
 
-  const myServerWpm = me?.wpm ?? localWpm;
-  const myServerAcc = me?.accuracy ?? localAcc;
+  const myServerWpm = me?.wpm ?? calculateWpm(typed, startedAt);
+  const myServerAcc = me?.accuracy ?? calculateAccuracy(typed, prompt);
   const myProgressPct = maxLen > 0 ? Math.floor(((me?.charsTyped ?? typed.length) / maxLen) * 100) : 0;
   const oppProgressPct = maxLen > 0 ? Math.floor(((opponent?.charsTyped ?? 0) / maxLen) * 100) : 0;
+
+
+  const iWon = (winnerUserId ?? match?.winnerUserId ?? null) === String(myUserId);
+
+
+  
 
   return (
     <div
@@ -208,6 +273,20 @@ export default function MatchPage() {
         </div>
       </div>
 
+      {/* 🟩 Left character */}
+      <img
+        src="/mech.png"
+        alt="Hero 1"
+        className="fixed left-5 bottom-25 w-48 h-auto object-contain z-20"
+      />
+
+      {/* 🟩 Right character */}
+      <img
+        src="/hero2.png"
+        alt="Hero 2"
+        className="fixed right-5 bottom-21 w-48 h-auto object-contain z-20"
+      />
+
       {/* Countdown */}
       {countdown !== null && (
         <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20 text-6xl font-bold">
@@ -221,11 +300,18 @@ export default function MatchPage() {
           {/* Prompt overlay */}
           <pre
             ref={promptScrollRef}
-            className="absolute top-0 left-0 w-full h-full pointer-events-none font-mono text-lg leading-6 p-3 whitespace-pre-wrap break-words overflow-y-auto z-20 box-border"
+            className="absolute top-0 left-0 w-full h-full pointer-events-none font-mono text-lg leading-6 whitespace-pre-wrap break-words overflow-y-auto z-20"
+            style={{
+              padding: '0.75rem',
+              margin: 0,
+              wordBreak: 'break-word',
+              overflowWrap: 'break-word'
+            }}
           >
             {prompt.split("").map((ch, i) => {
               const typedCh = typed[i];
               const correct = typedCh === undefined ? undefined : typedCh === ch;
+
               return (
                 <span
                   key={i}
@@ -244,19 +330,32 @@ export default function MatchPage() {
           </pre>
 
           {/* Textarea */}
-          <Textarea
+          <textarea
             ref={textAreaRef}
             value={typed}
             onChange={onType}
+            onKeyDown={onKeyDown}
+            onScroll={(e) => {
+              if (promptScrollRef.current) {
+                promptScrollRef.current.scrollTop = e.currentTarget.scrollTop;
+              }
+            }}
             disabled={finished}
-            size="lg"
-            radius="md"
-            disableAutosize
-            rows={10}
-            className="absolute top-0 left-0 w-full h-full font-mono text-lg leading-6 p-3 bg-slate-900 border border-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none z-10 box-border overflow-y-auto"
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            wrap="soft"
+            className="absolute top-0 left-0 w-full h-full font-mono text-lg leading-6 bg-transparent border-none focus:outline-none resize-none z-10 caret-white text-transparent overflow-y-auto"
+            style={{
+              padding: '0.75rem',
+              margin: 0,
+              caretColor: 'white',
+              wordBreak: 'break-word',
+              overflowWrap: 'break-word'
+            }}
           />
         </div>
-
 
         <div className="text-xs opacity-70 mt-1">{me?.errors ?? countErrors(prompt.slice(0, typed.length), typed)} errors</div>
 
@@ -277,6 +376,7 @@ export default function MatchPage() {
         </div>
         <div className="opacity-70">{hero ? `Hero: ${hero}` : null}</div>
       </div>
+
     </div>
   );
 }
@@ -291,4 +391,6 @@ function PlayerProgress({ title, pct, wpm, acc, highlight = false }: { title: st
       <Progress value={clamp(pct, 0, 100)} color={highlight ? "success" : "primary"} />
     </div>
   );
+
 }
+

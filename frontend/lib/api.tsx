@@ -1,4 +1,4 @@
-import {getToken} from "./auth";
+import { getToken } from "./auth";
 
 export async function login(identifier: string, password: string) {
   const res = await fetch("http://localhost:5000/api/auth/login", {
@@ -32,7 +32,7 @@ export async function signup(username: string, email: string, password: string) 
 
 export async function updatePassword(currentPassword: string, newPassword: string) {
   const token = getToken();
-  if(!token) {
+  if (!token) {
     throw new Error("No auth token found");
   }
   const res = await fetch("http://localhost:5000/api/auth/updatepassword", {
@@ -50,18 +50,18 @@ export async function updatePassword(currentPassword: string, newPassword: strin
 
 export async function createLobby(character: string, maxPlayers: number) {
   const token = getToken();
-  if(!token) {
+  if (!token) {
     throw new Error("No auth token found");
   }
   const res = await fetch("http://localhost:5000/api/lobby/createLobby", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-    body: JSON.stringify({ character, maxPlayers}),
+    body: JSON.stringify({ character, maxPlayers }),
     credentials: "include",
   });
   if (!res.ok) {
     if (res.status === 401 || res.status === 403) {
-      
+
       console.error("Authentication failed for createLobby");
       throw new Error("Authentication failed. Please log in again.");
     }
@@ -73,13 +73,13 @@ export async function createLobby(character: string, maxPlayers: number) {
 
 export async function getLobby(lobbyCode: string) {
   const token = getToken();
-  if(!token) {
+  if (!token) {
     throw new Error("No auth token found");
   }
   const res = await fetch(`http://localhost:5000/api/lobby/${lobbyCode}`, {
     method: "GET",
     credentials: "include",
-    headers: { "Content-Type": "application/json" , "Authorization": `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
   });
   if (!res.ok) {
     const errorData = await res.json();
@@ -99,7 +99,7 @@ export async function leaveLobby(lobbyCode: string): Promise<void> { // Returns 
       "Authorization": `Bearer ${token}`,
     },
     credentials: "include",
-    
+
   });
 
   if (!res.ok) {
@@ -133,9 +133,9 @@ export async function fetchUserProfile(token: string | undefined | null) {
 }
 
 export async function getUsername(): Promise<string> {
-  const token = getToken(); 
+  const token = getToken();
   if (!token) {
-      throw new Error("Authentication token not found.");
+    throw new Error("Authentication token not found.");
   }
   const res = await fetch("http://localhost:5000/api/user/username", {
     method: "GET",
@@ -150,7 +150,7 @@ export async function getUsername(): Promise<string> {
   return data.username;
 }
 
-export async function getLeaderboard(){
+export async function getLeaderboard() {
   const res = await fetch("http://localhost:5000/api/leaderboard", {
     method: "GET",
     credentials: "include",
@@ -160,11 +160,11 @@ export async function getLeaderboard(){
     throw new Error(errorData.message || "Fetch leaderboard failed");
   }
   return res.json();
-} 
+}
 
-export async function readyUp(code: string){
+export async function readyUp(code: string) {
   const token = getToken();
-  if(!token) {
+  if (!token) {
     throw new Error("No auth token found");
   }
   const res = await fetch(`http://localhost:5000/api/lobby/${code}/ready`, {
@@ -180,7 +180,7 @@ export async function readyUp(code: string){
 }
 
 export async function uploadAvatar(file: File, token: string | null | undefined, onProgress?: (percent: number) => void) {
-  
+
   if (!token) {
     throw new Error("No auth token found");
   }
@@ -204,7 +204,7 @@ export async function uploadAvatar(file: File, token: string | null | undefined,
 
 export async function joinLobby(lobbyCode: string) {
   const token = getToken();
-  if(!token) {
+  if (!token) {
     throw new Error("No auth token found");
   }
   const res = await fetch(`http://localhost:5000/api/lobby/${lobbyCode}/join`, {
@@ -219,9 +219,9 @@ export async function joinLobby(lobbyCode: string) {
   return res.json();
 }
 
-export async function unready(code: string){
+export async function unready(code: string) {
   const token = getToken();
-  if(!token) {
+  if (!token) {
     throw new Error("No auth token found");
   }
   const res = await fetch(`http://localhost:5000/api/lobby/${code}/unready`, {
@@ -237,7 +237,7 @@ export async function unready(code: string){
 }
 
 export async function startMatch(code: string) {
-  const API = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000/api";
+  const API = "http://localhost:5000/api";
   const res = await fetch(`${API}/lobby/${code}/start`, {
     method: "POST",
     headers: {
@@ -247,4 +247,31 @@ export async function startMatch(code: string) {
   });
   if (!res.ok) throw new Error(`Failed to start match (${res.status})`);
   return res.json();
+}
+
+export async function getMatchPrompt(code: string) {
+  const token = getToken();
+  if (!token) {
+    throw new Error("No auth token found");
+  }
+  const res = await fetch(
+    `http://localhost:5000/api/matches/${code}/prompt`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "include",
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to fetch prompt: ${res.status} ${text}`);
+  }
+
+  const data = await res.json();
+  console.log("[getMatchPrompt] Received:", data);
+  return data;
 }

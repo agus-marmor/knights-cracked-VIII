@@ -5,25 +5,14 @@ import Lobby from "../models/Lobby.js";
 import randomWord from "random-word"
 
 /** GET /api/prompts?count=100 */
-export async function getRandomPrompt(req, res) {
-  try {
-    const raw = Number(req.query.count);
-    const count = Math.min(Math.max(Number.isFinite(raw) ? Math.trunc(raw) : 100, 10), 500);
-    const text = generate({ exactly: count, join: " " });
-    return res.json({ count, text });
-  } catch (err) {
-    console.error("[getRandomPrompt]", err);
-    return res.status(500).json({ message: "Could not generate prompt" });
-  }
-}
 
-export function generatePrompt(wordCount = 100) {
+export function generatePrompt(wordCount = 10) {
   const count = Math.min(Math.max(wordCount, 10), 500);
   return generate({ exactly: count, join: " " });
 }
 
-export function makePrompt(totalWords = 100) {
-  console.log("Generated word:ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss")
+export function makePrompt(totalWords = 10) {
+  
   const words = [];
 
   for (let i = 0; i < totalWords; i++) {
@@ -71,11 +60,11 @@ export async function assignMatchPrompt(req, res) {
         code,
         lobbyId: lobby._id,
         status: "countdown",
-        promptText: generate({ exactly: 100, join: " " }), // <-- use generate
+        promptText: generate({ exactly: 10, join: " " }), // <-- use generate
         players: lobby.players.map(p => ({ userId: p.userId, username: p.username }))
       });
     } else if (!match.promptText) {
-      match.promptText = generate({ exactly: 100, join: " " }); // <-- use generate
+      match.promptText = generate({ exactly: 10, join: " " }); // <-- use generate
       await match.save();
     }
 

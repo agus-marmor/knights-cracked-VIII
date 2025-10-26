@@ -107,12 +107,12 @@ export default function LobbyPage({
     };
 
     // On receiving signal that game is starting
-    const handleGameStarting = (data: { gameId: string }) => {
+    const handleGameStarting = (data: { c: string }) => {
       console.log("Received gameStarting event:", data);
       if (navigatedRef.current) return;
       navigatedRef.current = true;
-      console.log(`Navigating to /match/${data.gameId} with hero ${myHero}`);
-      router.push(`/match/${data.gameId}?hero=${myHero}`); // **Navigate to game**
+      console.log(`Navigating to /match/${data.c} with hero ${myHero}`);
+      router.push(`/match/${data.c}?hero=${myHero}`); // **Navigate to game**
     };
 
     // On receiving an error specific to the lobby/socket actions
@@ -200,7 +200,7 @@ export default function LobbyPage({
       console.log("[onUnready] Sending unready request...");
       const result = await unready(lobbyCode);
       console.log("[onUnready] Unready response:", result);
-      
+
       // Manually update local state as fallback
       if (result && result.players) {
         console.log("[onUnready] Manually updating lobby state");
@@ -355,9 +355,11 @@ export default function LobbyPage({
                   variant="solid"
                   onPress={async () => {
                     try {
-                      const data = await startMatch(lobbyCode);
-                      console.log("Match started:", data);
-                      router.push(`/match/${lobbyCode}&?hero=${myHero}`);
+                      const res = await startMatch(lobbyCode);
+                      if (res.ok && res.matchId) {
+                        // wait 500ms to allow backend to save currentMatchId
+                        setTimeout(() => router.push(`/game/${lobbyCode}`), 500);
+                      }
                     } catch (e: any) {
                       console.error("Start match failed:", e);
                       setError(e.message || "Failed to start match");

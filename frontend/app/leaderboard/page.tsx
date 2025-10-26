@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Trophy, Zap, Clock, ArrowLeft, User, TrendingUp, Target, Award, ChevronUp, ChevronDown } from 'lucide-react';
 
-// --- Types ---
+// Types
 type LeaderboardEntry = {
   username: string;
   avatarUrl: string;
@@ -18,7 +18,7 @@ type LeaderboardEntry = {
 type SortKey = 'rank' | 'avgWPM' | 'peakWPM' | 'winRate' | 'totalMatches';
 type SortDirection = 'asc' | 'desc';
 
-// --- Mock Data Generator ---
+// Mock Data Generator 
 const generateMockData = (): LeaderboardEntry[] => {
   const names = ['SpeedDemon', 'KeyboardWarrior', 'TypeMaster', 'FastFingers', 'QuickTyper', 
                  'RacerPro', 'SwiftKeys', 'TurboTypist', 'NitroRacer', 'BlazingKeys',
@@ -43,7 +43,7 @@ const generateMockData = (): LeaderboardEntry[] => {
   }).sort((a, b) => b.averageWPM - a.averageWPM);
 };
 
-// --- Helper Functions ---
+// Helper Functions 
 const getRankClass = (rank: number): string => {
   switch (rank) {
     case 1:
@@ -64,7 +64,7 @@ const getRankBadge = (rank: number) => {
   return null;
 };
 
-// --- Main Leaderboard Component ---
+// Main Leaderboard Component 
 function LeaderboardDisplay() {
   const [data, setData] = useState<LeaderboardEntry[] | null>(null);
   const [sortedData, setSortedData] = useState<LeaderboardEntry[]>([]);
@@ -371,7 +371,7 @@ function LeaderboardDisplay() {
   );
 }
 
-// --- Page Export ---
+// Page Export
 export default function LeaderboardPage() {
   return (
     <div 

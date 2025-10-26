@@ -327,7 +327,7 @@ export async function startMatch(req, res) {
     }
 
     // Create new match
-    const promptText = makePrompt(100);
+    const promptText = makePrompt(10);
     console.log(promptText);
     active = await Match.create({
       code: upCode,

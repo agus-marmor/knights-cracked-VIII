@@ -22,7 +22,7 @@ export function initSocket(server, corsOrigin) {
   io = new Server(server, {
     cors: {
       origin(origin, cb) {
-        
+
         if (!origin) return cb(null, true);
         if (allowlist.has(origin)) return cb(null, true);
         cb(new Error("Not allowed by CORS"));
@@ -34,7 +34,7 @@ export function initSocket(server, corsOrigin) {
   });
 
   // 🔐 Auth middleware
-io.use((socket, next) => {
+  io.use((socket, next) => {
     console.log(`[Socket Auth] Trying connection for socket ID: ${socket.id}`);
     console.log("[Socket Auth] Query:", socket.handshake.query);
     console.log("[Socket Auth] Auth:", socket.handshake.auth);
@@ -43,8 +43,8 @@ io.use((socket, next) => {
     try {
       const h = socket.handshake.headers?.authorization || "";
       const tokenHeader = h.startsWith("Bearer ") ? h.slice(7) : null;
-      const tokenAuth   = socket.handshake.auth?.token || null;
-      const tokenQuery  = socket.handshake.query?.token || null; // Check query
+      const tokenAuth = socket.handshake.auth?.token || null;
+      const tokenQuery = socket.handshake.query?.token || null; // Check query
 
       const token = tokenQuery || tokenAuth || tokenHeader; // Prioritize query/auth
       console.log("[Socket Auth] Token found:", token ? "Yes" : "No");
@@ -58,8 +58,8 @@ io.use((socket, next) => {
       const p = jwt.verify(token, process.env.JWT_SECRET);
       // Basic check for payload structure
       if (!p || typeof p !== 'object' || !p.id || !p.username) {
-         console.error("[Socket Auth] Failed: Invalid token payload structure");
-         return next(new Error("Unauthorized: Invalid token payload"));
+        console.error("[Socket Auth] Failed: Invalid token payload structure");
+        return next(new Error("Unauthorized: Invalid token payload"));
       }
 
       // Attach user data to the socket object for later use
@@ -75,6 +75,53 @@ io.use((socket, next) => {
 
   // 🎮 Lobby Events
   io.on("connection", async (socket) => { // Make handler async
+    socket.on("progress:update", async ({ code, charsTyped, errors, finished }) => {
+      const up = (code || "").toUpperCase();
+      const match = await Match.findOne({ code: up });
+      if (!match) return;
+
+      // find the player inside match
+      const player = match.players.find(p =>
+        String(p.userId) === String(socket.user.id)
+      );
+      if (!player) return;
+
+      // update typing progress
+      player.charsTyped = charsTyped;
+      player.errors = errors;
+
+      // if player just finished
+      if (finished && !player.finished) {
+        player.finished = true;
+        player.finishedAt = new Date();
+
+        // ✅ calculate stats only if match started
+        if (match.startedAt) {
+          const minutes = (Date.now() - match.startedAt.getTime()) / 60000;
+          const wpm = Math.round(charsTyped / 5 / minutes);
+          const accuracy = charsTyped > 0
+            ? Math.round(Math.max(0, 100 * (1 - errors / charsTyped)))
+            : 100;
+
+          player.wpm = wpm;
+          player.accuracy = accuracy;
+        }
+      }
+
+      await match.save();
+
+      // broadcast progress update to all players in match
+      io.to(`match:${up}`).emit("match:progress", {
+        userId: socket.user.id,
+        charsTyped,
+        errors,
+        finished
+      });
+
+      // ✅ check if match should finish (everyone done)
+      await tryFinishMatch(io, match, up);
+    });
+
     // Get data attached by middleware and from query
     const user = socket.user;
     const lobbyCode = (socket.handshake.query?.lobbyCode)?.toUpperCase();
@@ -82,10 +129,10 @@ io.use((socket, next) => {
 
     // Basic validation on connection
     if (!user || !lobbyCode) {
-        console.error(`[Socket Connect] Invalid connection data. User: ${!!user}, LobbyCode: ${lobbyCode}. Disconnecting.`);
-        socket.emit("lobbyError", "Invalid connection data.");
-        socket.disconnect(true);
-        return;
+      console.error(`[Socket Connect] Invalid connection data. User: ${!!user}, LobbyCode: ${lobbyCode}. Disconnecting.`);
+      socket.emit("lobbyError", "Invalid connection data.");
+      socket.disconnect(true);
+      return;
     }
 
     const room = `lobby:${lobbyCode}`;
@@ -97,85 +144,85 @@ io.use((socket, next) => {
 
     // Update Lobby State in DB (Optional check/update on connect)
     try {
-        let lobby = await Lobby.findOne({ code: lobbyCode });
-        if (!lobby) {
-            console.error(`[Socket Connect] Lobby ${lobbyCode} not found for user ${user.username}. Disconnecting.`);
-            socket.emit("lobbyError", `Lobby ${lobbyCode} not found.`);
-            socket.disconnect(true);
-            return;
-        }
-        // Ensure player is actually in the lobby (important if join HTTP failed but socket connects)
-        let player = lobby.players.find(p => String(p.userId) === String(user.id));
-        if (!player) {
-             // Handle this case: Maybe the POST /join failed earlier?
-             // Option 1: Disconnect them
-             console.warn(`User ${user.username} connected via socket but not found in DB players array for lobby ${lobbyCode}. Disconnecting.`);
-             socket.emit("lobbyError", "Failed to properly join lobby.");
-             socket.disconnect(true);
-             return;
-             // Option 2: Try adding them now (more complex, needs capacity check etc.)
-        }
-        // Optionally update player's lastSeenAt or associate socket.id if needed
-        //await Lobby.updateOne({ code: lobbyCode, "players.userId": user.id }, { $set: { "players.$.lastSeenAt": new Date() }});
+      let lobby = await Lobby.findOne({ code: lobbyCode });
+      if (!lobby) {
+        console.error(`[Socket Connect] Lobby ${lobbyCode} not found for user ${user.username}. Disconnecting.`);
+        socket.emit("lobbyError", `Lobby ${lobbyCode} not found.`);
+        socket.disconnect(true);
+        return;
+      }
+      // Ensure player is actually in the lobby (important if join HTTP failed but socket connects)
+      let player = lobby.players.find(p => String(p.userId) === String(user.id));
+      if (!player) {
+        // Handle this case: Maybe the POST /join failed earlier?
+        // Option 1: Disconnect them
+        console.warn(`User ${user.username} connected via socket but not found in DB players array for lobby ${lobbyCode}. Disconnecting.`);
+        socket.emit("lobbyError", "Failed to properly join lobby.");
+        socket.disconnect(true);
+        return;
+        // Option 2: Try adding them now (more complex, needs capacity check etc.)
+      }
+      // Optionally update player's lastSeenAt or associate socket.id if needed
+      //await Lobby.updateOne({ code: lobbyCode, "players.userId": user.id }, { $set: { "players.$.lastSeenAt": new Date() }});
 
 
-        // Broadcast Updated Lobby State AFTER successful join/verification
-        const updatedLobbyState = await Lobby.findOne({ code: lobbyCode }).lean(); // Fetch fresh lean data
-        if (updatedLobbyState) {
-            const publicView = publicLobbyView(updatedLobbyState);
-            io.to(room).emit("lobby:update", publicView); // Broadcast to everyone in the room
-            console.log(`[Socket Connect] Broadcasted lobbyUpdate for ${lobbyCode}`);
-        }
+      // Broadcast Updated Lobby State AFTER successful join/verification
+      const updatedLobbyState = await Lobby.findOne({ code: lobbyCode }).lean(); // Fetch fresh lean data
+      if (updatedLobbyState) {
+        const publicView = publicLobbyView(updatedLobbyState);
+        io.to(room).emit("lobby:update", publicView); // Broadcast to everyone in the room
+        console.log(`[Socket Connect] Broadcasted lobbyUpdate for ${lobbyCode}`);
+      }
     } catch (dbError) {
-        console.error(`[Socket Connect] DB Error during connection for ${lobbyCode}:`, dbError);
-        socket.emit("lobbyError", "Server error processing lobby join.");
-        // Consider disconnecting if DB error prevents proper setup
-        // socket.disconnect(true);
+      console.error(`[Socket Connect] DB Error during connection for ${lobbyCode}:`, dbError);
+      socket.emit("lobbyError", "Server error processing lobby join.");
+      // Consider disconnecting if DB error prevents proper setup
+      // socket.disconnect(true);
     }
     socket.on("disconnecting", async (reason) => { // Make async
       console.log(`[Socket Disconnect] User ${user?.username} (Socket: ${socket.id}) disconnecting from ${lobbyCode}. Reason: ${reason}`);
       // Only proceed if user data is available
       if (!user?.id) {
-          console.warn(`[Socket Disconnect] User data missing on disconnect for socket ${socket.id}`);
-          return;
+        console.warn(`[Socket Disconnect] User data missing on disconnect for socket ${socket.id}`);
+        return;
       }
       // Remove player from DB lobby
       try {
-          const lobby = await Lobby.findOneAndUpdate(
-              { code: lobbyCode },
-              { $pull: { players: { userId: user.id } } }, // Remove player by userId
-              { new: true } // Get updated lobby document
-          );
+        const lobby = await Lobby.findOneAndUpdate(
+          { code: lobbyCode },
+          { $pull: { players: { userId: user.id } } }, // Remove player by userId
+          { new: true } // Get updated lobby document
+        );
 
-          if (lobby) {
-              console.log(`[Socket Disconnect] Player ${user.username} removed from lobby ${lobbyCode} players array.`);
-              let hostTransferred = false;
-              // Handle host transfer if necessary
-              if (lobby.hostUserId && String(lobby.hostUserId) === String(user.id) && lobby.players.length > 0) {
-                   lobby.hostUserId = lobby.players[0].userId; // Assign new host
-                   await lobby.save(); // Save the change
-                   hostTransferred = true;
-                   console.log(`[Socket Disconnect] Host transferred in lobby ${lobbyCode} to ${lobby.hostUserId}`);
-              }
-
-              // Broadcast the update after removal and potential host transfer
-              // Fetch final state as lean object if host was transferred (and saved), otherwise use the result from findOneAndUpdate
-              const finalLobbyState = hostTransferred ? await Lobby.findById(lobby._id).lean() : lobby.toObject(); // Use toObject() if not lean
-              io.to(room).emit("lobby:update", publicLobbyView(finalLobbyState));
-              console.log(`[Socket Disconnect] Broadcasted lobbyUpdate for ${lobbyCode} after ${user.username} left.`);
-
-              // Check if lobby is now empty and potentially delete it (optional, if not using TTL)
-              if (lobby.players.length === 0) {
-                   console.log(`[Socket Disconnect] Lobby ${lobbyCode} is now empty. Deleting...`);
-                   await Lobby.deleteOne({ code: lobbyCode });
-                   console.log(`[Socket Disconnect] Lobby ${lobbyCode} deleted.`);
-              }
-
-          } else {
-               console.log(`[Socket Disconnect] Lobby ${lobbyCode} not found or player ${user.username} already removed during disconnect cleanup.`);
+        if (lobby) {
+          console.log(`[Socket Disconnect] Player ${user.username} removed from lobby ${lobbyCode} players array.`);
+          let hostTransferred = false;
+          // Handle host transfer if necessary
+          if (lobby.hostUserId && String(lobby.hostUserId) === String(user.id) && lobby.players.length > 0) {
+            lobby.hostUserId = lobby.players[0].userId; // Assign new host
+            await lobby.save(); // Save the change
+            hostTransferred = true;
+            console.log(`[Socket Disconnect] Host transferred in lobby ${lobbyCode} to ${lobby.hostUserId}`);
           }
+
+          // Broadcast the update after removal and potential host transfer
+          // Fetch final state as lean object if host was transferred (and saved), otherwise use the result from findOneAndUpdate
+          const finalLobbyState = hostTransferred ? await Lobby.findById(lobby._id).lean() : lobby.toObject(); // Use toObject() if not lean
+          io.to(room).emit("lobby:update", publicLobbyView(finalLobbyState));
+          console.log(`[Socket Disconnect] Broadcasted lobbyUpdate for ${lobbyCode} after ${user.username} left.`);
+
+          // Check if lobby is now empty and potentially delete it (optional, if not using TTL)
+          if (lobby.players.length === 0) {
+            console.log(`[Socket Disconnect] Lobby ${lobbyCode} is now empty. Deleting...`);
+            await Lobby.deleteOne({ code: lobbyCode });
+            console.log(`[Socket Disconnect] Lobby ${lobbyCode} deleted.`);
+          }
+
+        } else {
+          console.log(`[Socket Disconnect] Lobby ${lobbyCode} not found or player ${user.username} already removed during disconnect cleanup.`);
+        }
       } catch (disconnectDbError) {
-          console.error(`[Socket Disconnect] DB Error during disconnect for ${lobbyCode}:`, disconnectDbError);
+        console.error(`[Socket Disconnect] DB Error during disconnect for ${lobbyCode}:`, disconnectDbError);
       }
     }); // End 'disconnecting' handler
 
@@ -189,26 +236,26 @@ io.use((socket, next) => {
       });
     });
     socket.on("match:subscribe", async ({ code }) => {
-  const up = (code || "").toUpperCase();
-  const room = `match:${up}`;
+      const up = (code || "").toUpperCase();
+      const room = `match:${up}`;
 
-  // OPTIONALLY: verify the user is in the lobby for this code
-  socket.join(room);
+      // OPTIONALLY: verify the user is in the lobby for this code
+      socket.join(room);
 
-  // Send the latest match immediately
-  const match = await Match.findOne({ code: up })
-    .sort({ createdAt: -1 })
-    .lean();
-  if (match) {
-    socket.emit("match:update", publicMatchView(match)); // must include promptText
-  } else {
-    socket.emit("match:update", null); // your client can handle null gracefully
-  }
-});
+      // Send the latest match immediately
+      const match = await Match.findOne({ code: up })
+        .sort({ createdAt: -1 })
+        .lean();
+      if (match) {
+        socket.emit("match:update", publicMatchView(match)); // must include promptText
+      } else {
+        socket.emit("match:update", null); // your client can handle null gracefully
+      }
+    });
 
   });
 
-  
+
 
   return io;
 }
@@ -271,7 +318,7 @@ function finalizeResult(match, reason) {
   // - If no one finished (timeout): most charsTyped; then accuracy; then WPM
   const finished = match.players.filter(p => p.finished);
   if (finished.length > 0) {
-    finished.sort((a,b) => {
+    finished.sort((a, b) => {
       const ta = a.finishedAt?.getTime?.() ?? new Date(a.finishedAt).getTime?.() ?? 0;
       const tb = b.finishedAt?.getTime?.() ?? new Date(b.finishedAt).getTime?.() ?? 0;
       if (ta !== tb) return ta - tb;                     // earlier finish wins
@@ -280,7 +327,7 @@ function finalizeResult(match, reason) {
     });
     match.winnerUserId = finished[0].userId;
   } else {
-    const best = [...match.players].sort((a,b) => {
+    const best = [...match.players].sort((a, b) => {
       if (b.charsTyped !== a.charsTyped) return b.charsTyped - a.charsTyped;
       if (b.accuracy !== a.accuracy) return b.accuracy - a.accuracy;
       return b.wpm - a.wpm;

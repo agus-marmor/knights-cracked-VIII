@@ -8,12 +8,11 @@ import React, {
   ReactNode
 } from 'react';
 
-// --- Placeholder sound effect paths ---
-// You would place these in your /public folder
-const KEYPRESS_SOUND_SRC = 'keyboard-click-327728.mp3'; // <-- UPDATED
-const WIN_SOUND_SRC = 'tadaa-47995.mp3'; // <-- UPDATED
-const JOIN_SOUND_SRC = 'Joined Lobby.mp3'; // <-- UPDATED
-const MUSIC_SRC = 'big-beat-loop-275479.mp3'; // <-- UPDATED
+// Update these lines at the top of your sfx.tsx file:
+const KEYPRESS_SOUND_SRC = '/sounds/keyboard-click-327728.mp3'; // <-- Add /sounds/
+const WIN_SOUND_SRC = '/sounds/tadaa-47995.mp3'; // <-- Add /sounds/
+const JOIN_SOUND_SRC = '/sounds/Joined Lobby.mp3'; // <-- Add /sounds/
+const MUSIC_SRC = '/sounds/big-beat-loop-275479.mp3'; // <-- Add /sounds/
 
 // 1. Define the "shape" of your context
 type AudioContextType = {
