@@ -54,7 +54,7 @@ export function UserProfileData() {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
-        // ... (fetching logic remains the same) ...
+        // fetching logic remains the same
         const loadProfile = async () => {
             setLoading(true); setError(null); const token = getToken();
             if (!token) { setError("Not authenticated"); setLoading(false); return; }
@@ -151,18 +151,18 @@ export function UserProfileData() {
             </div>
             {uploadError && <p className="text-red-500 text-xs mt-1 mb-2">{uploadError}</p>}
 
-            <h1 className="text-3xl font-bold text-white mb-1"> {/* Reduced mb */}
+            <h1 className="text-3xl font-bold text-white mb-1"> {}
                 {profile.username}
             </h1>
-            <p className="text-gray-400 text-sm mb-6">{profile.email}</p> {/* Added email */}
+            <p className="text-gray-400 text-sm mb-6">{profile.email}</p> {}
 
-            {/* 3. Updated Stats Grid */}
-            <div className="grid grid-cols-3 gap-6 text-center border-t border-gray-700 pt-6"> {/* Increased gap, added top border */}
+            {/* Stats Grid */}
+            <div className="grid grid-cols-3 gap-6 text-center border-t border-gray-700 pt-6"> {}
                 {/* Matches */}
                 <div>
                     <ClipboardList className="w-7 h-7 text-indigo-400 mx-auto mb-2" />
                     <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Matches</p>
-                    <p className="text-3xl font-bold text-indigo-300">{profile.stats.totalMatches}</p> {/* Adjusted size/color */}
+                    <p className="text-3xl font-bold text-indigo-300">{profile.stats.totalMatches}</p> {}
                 </div>
                 {/* Avg WPM */}
                 <div>
@@ -184,7 +184,7 @@ export function UserProfileData() {
                 </div>
                 {/* Losses */}
                 <div>
-                    {/* Could use a different icon for losses, e.g., XCircle */}
+                    {}
                     <BadgeCheck className="w-7 h-7 text-red-400 mx-auto mb-2" />
                     <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Losses</p>
                     <p className="text-3xl font-bold text-red-300">{profile.stats.losses}</p>

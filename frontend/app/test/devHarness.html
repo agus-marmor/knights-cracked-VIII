@@ -99,7 +99,7 @@
         words = (m.promptText || "").trim().split(/\s+/);
         // identify me/opponent from token payload if available server-side, else pick first two players
         if (m.players && m.players.length >= 1) {
-          // if your backend puts username in socket.user, you can also fetch /api/me; here we just choose first as "me" for demo
+          // if backend puts username in socket.user, fetch /api/me; here we just choose first as "me" for demo
           me = me.id ? me : m.players[0];
           opponent = m.players.find(p => p.userId !== me.userId) || m.players[0];
           me.id = me.userId; opponent.id = opponent.userId;
@@ -150,7 +150,7 @@
         const expected = words[myIndex] || "";
         if (typed && expected && typed === expected) {
           socket?.emit("word:complete", { code: $("code").value.trim(), typed });
-          // optional: also send progress for your WPM system
+          // optional: also send progress for WPM system
           // socket?.emit("progress:update", { code: $("code").value.trim(), charsTyped: ???, errors: 0, finished: false });
           $("input").value = "";
           myIndex++;

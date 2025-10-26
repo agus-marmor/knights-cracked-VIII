@@ -114,10 +114,10 @@ export default function SettingsPage() {
 
 
   return (
-    // 3. Added 'relative' to the main container
+    // 3. Added relative to the main container
     <div className="relative min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4 sm:p-6 lg:p-8">
 
-      {/* 4. Added Back Link */}
+      {/* Added Back Link */}
       <Link href="/dashboard" legacyBehavior>
         <a className="absolute top-4 left-4 sm:top-6 sm:left-6 lg:top-8 lg:left-8 flex items-center gap-2 text-gray-300 hover:text-white transition-colors z-10">
           <ArrowLeft size={20} />
@@ -132,7 +132,7 @@ export default function SettingsPage() {
         </CardHeader>
 
         <CardBody className="px-6 py-4 space-y-6">
-          {/* --- Account Management --- */}
+          {/* Account Management */}
           <section>
             <h2 className="text-lg font-semibold mb-3 text-blue-400">Account Management</h2>
             <div className="space-y-3">
@@ -159,7 +159,7 @@ export default function SettingsPage() {
 
           <Divider className="bg-slate-700" />
 
-          {/* --- Game Preferences --- */}
+          {/* Game Preferences */}
           <section>
             <h2 className="text-lg font-semibold mb-4 text-blue-400">Game Preferences</h2>
             <div className="space-y-5">
@@ -198,9 +198,9 @@ export default function SettingsPage() {
         </CardFooter>
       </Card>
 
-      {/* --- Modals --- */}
-      {/* ... (Modal code remains the same) ... */}
-      {/* Change Password Modal (Basic Structure) */}
+      {/* Modals */}
+      {}
+      {/* Change Password Modal */}
       <Modal isOpen={isPasswordOpen} onOpenChange={onPasswordOpenChange} placement="center">
         <ModalContent>
           {(onClose) => (

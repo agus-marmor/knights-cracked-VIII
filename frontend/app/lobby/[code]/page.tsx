@@ -5,13 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { readyUp, getLobby, leaveLobby, unready } from "@/lib/api";
 import io, { Socket } from "socket.io-client";
-import { getToken, getCurrentUserId } from "@/lib/auth"; // Assuming getCurrentUserId exists in auth
+import { getToken, getCurrentUserId } from "@/lib/auth"; 
 import { Button, Spinner } from "@heroui/react"; // Import Spinner
 import { LogOut } from "lucide-react"; // Icon for leave button
 
-// --- Types ---
+// Types
 type LobbyPlayer = {
-  id: string; // Ensure ID is present
+  id: string; 
   username: string;
   character?: string;
   ready?: boolean
@@ -24,7 +24,6 @@ type Lobby = {
   gameId?: string;
   hostId?: string;
 };
-// --- End Types ---
 
 const SOCKET_SERVER_URL = "http://localhost:5000";
 
@@ -50,9 +49,9 @@ export default function LobbyPage({
   const socketRef = useRef<Socket | null>(null);
   const currentUserId = getCurrentUserId();
   console.log("Current User ID:", currentUserId);
-  // 3. Get current user's ID
+  // Get current user's ID
 
-  // --- Initial Lobby Fetch ---
+  // Initial Lobby Fetch
   useEffect(() => {
     if (!lobbyCode) return;
     const fetchInitialLobby = async () => {
@@ -75,9 +74,9 @@ export default function LobbyPage({
   }, [lobbyCode]);
 
 
-  // --- WebSocket Connection --- 
+  // WebSocket Connection
   useEffect(() => {
-    if (!lobbyCode || !currentUserId) { // Ensure userId is available too
+    if (!lobbyCode || !currentUserId) { 
       // setError("Lobby code or user ID missing."); // Might conflict with initial load error
       return;
     }
@@ -94,14 +93,14 @@ export default function LobbyPage({
 
       socket.emit("lobby:subscribe", { code: lobbyCode });
       console.log(`[LobbyPage] Emitted lobby:subscribe for ${lobbyCode}`);
-      // Optional: You could emit a confirmation or fetch initial state again here if needed
+      // Optional: emit a confirmation or fetch initial state again here if needed
     };
 
     // On receiving lobby data updates
     const handleLobbyUpdate = (updatedLobbyData: Lobby) => {
       console.log("[LobbyPage] === Received lobbyUpdate ===");
       console.log("[LobbyPage] Data received:", JSON.stringify(updatedLobbyData, null, 2));
-      setLobby(updatedLobbyData); // **Update the lobby state**
+      setLobby(updatedLobbyData); 
       setError(""); // Clear any previous errors
       console.log("[LobbyPage] Lobby state updated.");
     };
@@ -112,24 +111,23 @@ export default function LobbyPage({
       if (navigatedRef.current) return;
       navigatedRef.current = true;
       console.log(`Navigating to /match/${data.c} with hero ${myHero}`);
-      router.push(`/match/${data.c}?hero=${myHero}`); // **Navigate to game**
+      router.push(`/match/${data.c}?hero=${myHero}`); // Navigate to game
     };
 
     // On receiving an error specific to the lobby/socket actions
     const handleLobbyError = (errorMessage: string) => {
       console.error("Received lobbyError:", errorMessage);
-      setError(errorMessage); // **Set the error state**
+      setError(errorMessage); // Set the error state
     };
 
     // On disconnecting from the server
     const handleDisconnect = (reason: string) => {
       console.log("Disconnected from Socket.IO:", reason);
-      // Don't clear lobby state here, maybe show a reconnecting UI?
-      setError("Lost connection to the lobby server."); // **Set error state**
-      // Optionally attempt reconnection logic here
+      // Don't clear lobby state here, maybe show a reconnecting UI
+      setError("Lost connection to the lobby server."); // Set error state
     };
 
-    // --- Attach Listeners ---
+    // Attach Listeners
     socket.on("connect", handleConnect);
     socket.on("lobby:update", handleLobbyUpdate);
 
@@ -141,7 +139,7 @@ export default function LobbyPage({
     socket.on("lobby:presence", (p) => console.log("presence:", p));
     socket.on("disconnect", handleDisconnect);
 
-    // --- Cleanup Function ---
+    // Cleanup Function
     return () => {
       console.log("Disconnecting socket...");
       // Remove specific listeners before disconnecting
@@ -156,7 +154,7 @@ export default function LobbyPage({
   }, [lobbyCode, myHero, router, currentUserId]);
 
 
-  // --- Derive state using userId ---
+  // Derive state using userId 
   const players = lobby?.players ?? [];
   console.log("Players array for useMemo:", players);
   const me = useMemo(
@@ -176,7 +174,7 @@ export default function LobbyPage({
   const otherReady = Boolean(other?.ready);
 
 
-  // --- Ready Up Handler ---
+  // Ready Up Handler
   const onReady = async () => {
     if (sendingReady || !socketRef.current) return;
     try {
@@ -191,7 +189,7 @@ export default function LobbyPage({
     }
   };
 
-  // --- Unready Handler ---
+  // Unready Handler 
   const onUnready = async () => {
     if (sendingReady || !socketRef.current) return;
     try {
@@ -233,7 +231,7 @@ export default function LobbyPage({
   };
 
 
-  // --- Render Logic ---
+  // Render Logic 
   if (loadingInitial) {
     return (
       <div className="flex flex-col gap-4 justify-center items-center h-screen bg-gray-900">
@@ -314,7 +312,7 @@ export default function LobbyPage({
             <p className="text-gray-300 animate-pulse">Waiting for opponent to join…</p>
           )}
 
-          {/* Ready button - shown when not ready and has opponent */}
+          {/* Ready button */}
           {hasOpponent && !meReady && (
             <Button
               color="primary"
@@ -328,7 +326,7 @@ export default function LobbyPage({
             </Button>
           )}
 
-          {/* Unready button and waiting message - shown when ready */}
+          {/* Unready button */}
           {hasOpponent && meReady && (
             <>
               <p className="text-emerald-400 font-semibold flex items-center gap-2">
@@ -348,7 +346,7 @@ export default function LobbyPage({
               >
                 {sendingReady ? "Updating…" : "Not Ready"}
               </Button>
-              {/* At the bottom of your main render logic in LobbyPage */}
+              {}
               {hasOpponent && (
                 <Button
                   color="success"
@@ -358,7 +356,7 @@ export default function LobbyPage({
                       const res = await startMatch(lobbyCode);
                       if (res.ok && res.matchId) {
                         // wait 500ms to allow backend to save currentMatchId
-                        setTimeout(() => router.push(`/game/${lobbyCode}`), 500);
+                        setTimeout(() => router.push(`/match/${lobbyCode}`), 500);
                       }
                     } catch (e: any) {
                       console.error("Start match failed:", e);
@@ -378,8 +376,6 @@ export default function LobbyPage({
 }
 
 
-// --- Updated Player Panel ---
-// Now uses player.username
 function PlayerPanel({ player, isMe, heroId }: { player: LobbyPlayer | undefined, isMe: boolean, heroId?: string }) {
   // Determine hero based on player data first, then fallback to prop if it's "me"
   const characterId = (player?.character || (isMe ? heroId : undefined) || "Kaiju").toLowerCase();

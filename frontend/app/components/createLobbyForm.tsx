@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Button } from '@heroui/react';
 import Image from 'next/image';
-import { useAudio } from '@/lib/sfx'; // <-- Add this import
+import { useAudio } from '@/lib/sfx'; 
 
 type Hero = { id: string; name: string; src: string; };
 
@@ -20,22 +20,22 @@ interface CreateLobbyFormProps {
 
 export default function CreateLobbyForm({ onSubmit, onCancel, isLoading, error }: CreateLobbyFormProps) {
   const [selectedHero, setSelectedHero] = useState<string | null>(null);
-  const { playKeypressSound } = useAudio(); // <-- Add this hook
+  const { playKeypressSound } = useAudio(); 
 
   const handleSubmit = () => {
-    playKeypressSound(); // <-- Add sound
+    playKeypressSound(); 
     if (selectedHero) {
       onSubmit(selectedHero);
     }
   };
 
   const handleCancel = () => {
-    playKeypressSound(); // <-- Add sound
+    playKeypressSound(); 
     onCancel();
   };
 
   const handleHeroSelect = (heroId: string) => {
-    playKeypressSound(); // <-- Add sound
+    playKeypressSound(); 
     setSelectedHero(heroId);
   };
 
@@ -51,7 +51,7 @@ export default function CreateLobbyForm({ onSubmit, onCancel, isLoading, error }
             <button
               key={hero.id}
               type="button"
-              onClick={() => handleHeroSelect(hero.id)} // <-- Changed
+              onClick={() => handleHeroSelect(hero.id)} 
               className={`relative group rounded-xl p-4 border-2 transition-all duration-200 ease-in-out ${
                 selectedHero === hero.id
                   ? "border-blue-500 ring-2 ring-blue-500/50 bg-slate-800/70 scale-105"
@@ -79,7 +79,7 @@ export default function CreateLobbyForm({ onSubmit, onCancel, isLoading, error }
 
       {/* Submit/Cancel Buttons */}
       <div className="flex justify-end gap-2 mt-4">
-        <Button color="danger" variant="light" onPress={handleCancel} disabled={isLoading}> {/* <-- Changed */}
+        <Button color="danger" variant="light" onPress={handleCancel} disabled={isLoading}> {/* Changed */}
           Cancel
         </Button>
         <Button

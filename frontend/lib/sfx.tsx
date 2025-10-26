@@ -8,22 +8,21 @@ import React, {
   ReactNode
 } from 'react';
 
-// Update these lines at the top of your sfx.tsx file:
-const KEYPRESS_SOUND_SRC = '/sounds/keyboard-click-327728.mp3'; // <-- Add /sounds/
-const WIN_SOUND_SRC = '/sounds/tadaa-47995.mp3'; // <-- Add /sounds/
-const JOIN_SOUND_SRC = '/sounds/Joined Lobby.mp3'; // <-- Add /sounds/
-const MUSIC_SRC = '/sounds/big-beat-loop-275479.mp3'; // <-- Add /sounds/
+const KEYPRESS_SOUND_SRC = '/sounds/keyboard-click-327728.mp3'; 
+const WIN_SOUND_SRC = '/sounds/tadaa-47995.mp3'; 
+const JOIN_SOUND_SRC = '/sounds/Joined Lobby.mp3'; 
+const MUSIC_SRC = '/sounds/big-beat-loop-275479.mp3'; 
 
-// 1. Define the "shape" of your context
+
 type AudioContextType = {
   isMuted: boolean;
   toggleMute: () => void;
   playKeypressSound: () => void;
   playWinSound: () => void;
-  playJoinSound: () => void; // <-- CHANGED
+  playJoinSound: () => void; 
 };
 
-// 2. Create the Context
+// Create the Context
 const AudioContext = createContext<AudioContextType | undefined>(undefined);
 
 // 3. Create the Provider (the component that does the work)
@@ -36,7 +35,7 @@ export const AudioProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const winSoundRef = useRef<HTMLAudioElement | null>(null);
   const joinSoundRef = useRef<HTMLAudioElement | null>(null); // <-- CHANGED
 
-  // --- Background Music Control ---
+  // Background Music Control 
   const toggleMute = useCallback(() => {
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
@@ -45,11 +44,10 @@ export const AudioProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       // Autoplay is often blocked until user interaction
       bgMusicRef.current.play().catch(e => console.error("Audio play failed:", e));
     }
-  }, [isMuted]); // <-- FIX: Changed isMMuted to isMuted
+  }, [isMuted]); 
 
-  // --- Sound Effect Controls ---
+  // Sound Effect Controls 
   // We use a function to load/play on demand
-  // FIX: Changed parameter type to allow for 'null'
   const playSound = (ref: React.RefObject<HTMLAudioElement | null>) => { 
     if (!isMuted && ref.current) {
       ref.current.currentTime = 0; // Rewind
@@ -59,18 +57,18 @@ export const AudioProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const playKeypressSound = useCallback(() => playSound(keypressSoundRef), [isMuted]);
   const playWinSound = useCallback(() => playSound(winSoundRef), [isMuted]);
-  const playJoinSound = useCallback(() => playSound(joinSoundRef), [isMuted]); // <-- CHANGED
+  const playJoinSound = useCallback(() => playSound(joinSoundRef), [isMuted]); 
   
   // Load SFX on the client
   useEffect(() => {
     keypressSoundRef.current = new Audio(KEYPRESS_SOUND_SRC);
     winSoundRef.current = new Audio(WIN_SOUND_SRC);
-    joinSoundRef.current = new Audio(JOIN_SOUND_SRC); // <-- CHANGED
+    joinSoundRef.current = new Audio(JOIN_SOUND_SRC); 
     
     // Preload them
     keypressSoundRef.current.preload = 'auto';
     winSoundRef.current.preload = 'auto';
-    joinSoundRef.current.preload = 'auto'; // <-- CHANGED
+    joinSoundRef.current.preload = 'auto'; 
   }, []);
 
   const value = {
@@ -78,7 +76,7 @@ export const AudioProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     toggleMute,
     playKeypressSound,
     playWinSound,
-    playJoinSound // <-- CHANGED
+    playJoinSound 
   };
 
   return (
@@ -93,7 +91,7 @@ export const AudioProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   );
 };
 
-// 4. Create a custom hook to easily use the context
+// Create a custom hook to easily use the context
 export const useAudio = () => {
   const context = useContext(AudioContext);
   if (context === undefined) {

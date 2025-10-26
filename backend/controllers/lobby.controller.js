@@ -394,19 +394,11 @@ export async function kickPlayer(req, res) {
     if (lobby.players.length < originalPlayerCount) {
       await lobby.save();
 
-      // --- Broadcast Update --- 📡
+      // Broadcast Update
       const io = getIO();
       const updatedLobbyState = await Lobby.findById(lobby._id).lean();
       await emitLobbySnapshot(upCode);
 
-      // --- (Optional) Notify the kicked player ---
-      // You'd need a way to map userIdToKick back to their socket ID if they are connected
-      // const kickedSocket = findSocketByUserId(userIdToKick);
-      // if (kickedSocket) {
-      //   kickedSocket.emit("kicked", { lobbyCode: upCode, reason: "Kicked by host." });
-      //   kickedSocket.leave(`lobby:${upCode}`);
-      // }
-      // --- End Notify Kicked ---
 
     } else {
       // Player to kick wasn't found in the lobby

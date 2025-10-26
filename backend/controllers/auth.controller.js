@@ -32,7 +32,7 @@ export const signup = async (req, res) => {
     const normalizedEmail = String(email).toLowerCase().trim();
     const normalizedUsername = String(username).toLowerCase().trim();
 
-    // Ensure uniqueness (email OR username)
+    // Ensure uniqueness for email or username
     const existing = await User.findOne({
       $or: [{ email: normalizedEmail }, { username: normalizedUsername }],
     });
@@ -129,7 +129,6 @@ export const updatePassword = async (req, res) => {
     user.password = hash;
     await user.save();
 
-    // Optional: issue a fresh token so the client can replace stored JWT
     const token = signToken(user);
     return res.json({ message: "Password updated.", token });
   } catch (err) {
