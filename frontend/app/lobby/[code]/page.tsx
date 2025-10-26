@@ -1,14 +1,33 @@
 "use client";
+import { startMatch } from "@/lib/api";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getLobby, readyUp } from "@/lib/api";
 
-type LobbyPlayer = { character?: string; ready?: boolean };
+import { readyUp, getLobby, leaveLobby, unready } from "@/lib/api";
+import io, { Socket } from "socket.io-client";
+import { getToken, getCurrentUserId } from "@/lib/auth"; // Assuming getCurrentUserId exists in auth
+import { Button, Spinner } from "@heroui/react"; // Import Spinner
+import { LogOut } from "lucide-react"; // Icon for leave button
+
+// --- Types ---
+type LobbyPlayer = {
+  id: string; // Ensure ID is present
+  username: string;
+  character?: string;
+  ready?: boolean
+};
 type Lobby = {
+  id: string;
+  code: string;
   players?: LobbyPlayer[];
   gameStarted?: boolean;
   gameId?: string;
+  hostId?: string;
 };
+// --- End Types ---
+
+const SOCKET_SERVER_URL = "http://localhost:5000";
+
 
 export default function LobbyPage({
   params,
@@ -20,200 +39,391 @@ export default function LobbyPage({
 
   const router = useRouter();
   const search = useSearchParams();
-  const myHero = (search.get("hero") || "alpha").toLowerCase();
+  const myHero = (search.get("hero") || "kaiju").toLowerCase(); // Still needed for initial display?
 
   const [lobby, setLobby] = useState<Lobby | null>(null);
   const [error, setError] = useState<string>("");
+  const [loadingInitial, setLoadingInitial] = useState(true); // Loading state for initial fetch
   const [sendingReady, setSendingReady] = useState(false);
+  const [leavingLobby, setLeavingLobby] = useState(false); // Loading state for leaving
   const navigatedRef = useRef(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const currentUserId = getCurrentUserId();
+  console.log("Current User ID:", currentUserId);
+  // 3. Get current user's ID
 
-  // Poll lobby every 1s
+  // --- Initial Lobby Fetch ---
   useEffect(() => {
-    const tick = async () => {
+    if (!lobbyCode) return;
+    const fetchInitialLobby = async () => {
+      setLoadingInitial(true); // Start loading
+      setError(""); // Clear previous errors
       try {
-        const data = await getLobby(lobbyCode);
-        setLobby(data);
+        const initialData = await getLobby(lobbyCode);
+        setLobby(initialData);
       } catch (e: any) {
-        setError(e?.message || "Failed to load lobby");
+        setError(e?.message || "Failed to load lobby data");
+        console.error("Initial fetch failed:", e);
+        if (e.message?.includes("404") || e.message?.toLowerCase().includes("not found")) {
+          setError(`Lobby "${lobbyCode}" not found.`); // Specific error
+        }
+      } finally {
+        setLoadingInitial(false); // Finish loading
       }
     };
-    tick();
-    timerRef.current = setInterval(tick, 1000);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
+    fetchInitialLobby();
   }, [lobbyCode]);
 
-  const players = lobby?.players ?? [];
 
+  // --- WebSocket Connection --- 
+  useEffect(() => {
+    if (!lobbyCode || !currentUserId) { // Ensure userId is available too
+      // setError("Lobby code or user ID missing."); // Might conflict with initial load error
+      return;
+    }
+
+    const socket = io(SOCKET_SERVER_URL, {
+      // Send token for auth middleware AND userId for identification
+      query: { lobbyCode, token: getToken(), userId: currentUserId, hero: myHero }
+    });
+
+    socketRef.current = socket;
+
+    const handleConnect = () => {
+      console.log("[LobbyPage] Socket connected! ID:", socket.id);
+
+      socket.emit("lobby:subscribe", { code: lobbyCode });
+      console.log(`[LobbyPage] Emitted lobby:subscribe for ${lobbyCode}`);
+      // Optional: You could emit a confirmation or fetch initial state again here if needed
+    };
+
+    // On receiving lobby data updates
+    const handleLobbyUpdate = (updatedLobbyData: Lobby) => {
+      console.log("[LobbyPage] === Received lobbyUpdate ===");
+      console.log("[LobbyPage] Data received:", JSON.stringify(updatedLobbyData, null, 2));
+      setLobby(updatedLobbyData); // **Update the lobby state**
+      setError(""); // Clear any previous errors
+      console.log("[LobbyPage] Lobby state updated.");
+    };
+
+    // On receiving signal that game is starting
+    const handleGameStarting = (data: { gameId: string }) => {
+      console.log("Received gameStarting event:", data);
+      if (navigatedRef.current) return;
+      navigatedRef.current = true;
+      console.log(`Navigating to /match/${data.gameId} with hero ${myHero}`);
+      router.push(`/match/${data.gameId}?hero=${myHero}`); // **Navigate to game**
+    };
+
+    // On receiving an error specific to the lobby/socket actions
+    const handleLobbyError = (errorMessage: string) => {
+      console.error("Received lobbyError:", errorMessage);
+      setError(errorMessage); // **Set the error state**
+    };
+
+    // On disconnecting from the server
+    const handleDisconnect = (reason: string) => {
+      console.log("Disconnected from Socket.IO:", reason);
+      // Don't clear lobby state here, maybe show a reconnecting UI?
+      setError("Lost connection to the lobby server."); // **Set error state**
+      // Optionally attempt reconnection logic here
+    };
+
+    // --- Attach Listeners ---
+    socket.on("connect", handleConnect);
+    socket.on("lobby:update", handleLobbyUpdate);
+
+    socket.on("match:created", ({ code }) => {
+      if (navigatedRef.current) return;
+      navigatedRef.current = true;
+      router.push(`/match/${code}?hero=${myHero}`);
+    });
+    socket.on("lobby:presence", (p) => console.log("presence:", p));
+    socket.on("disconnect", handleDisconnect);
+
+    // --- Cleanup Function ---
+    return () => {
+      console.log("Disconnecting socket...");
+      // Remove specific listeners before disconnecting
+      socket.off("connect", handleConnect);
+      socket.off("lobby:update", handleLobbyUpdate);
+      socket.off("gameStarting", handleGameStarting);
+      socket.off("lobbyError", handleLobbyError);
+      socket.off("disconnect", handleDisconnect);
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [lobbyCode, myHero, router, currentUserId]);
+
+
+  // --- Derive state using userId ---
+  const players = lobby?.players ?? [];
+  console.log("Players array for useMemo:", players);
   const me = useMemo(
-    () => players.find((p) => (p.character || "").toLowerCase() === myHero),
-    [players, myHero]
+    () => players.find((p) => String(p.id).trim() === String(currentUserId).trim()), // Compare using p.id
+    [players, currentUserId]
   );
+
   const other = useMemo(
-    () => players.find((p) => (p.character || "").toLowerCase() !== myHero),
-    [players, myHero]
+    () => players.find((p) => String(p.id).trim() !== String(currentUserId).trim()), // Compare using p.id
+    [players, currentUserId]
   );
+  console.log("Identified 'me':", me);
+  console.log("Identified 'other':", other);
 
   const hasOpponent = Boolean(other);
   const meReady = Boolean(me?.ready);
   const otherReady = Boolean(other?.ready);
 
-  // Redirect both players to game when ready
-  useEffect(() => {
-    if (navigatedRef.current) return;
-    const shouldStart =
-      (meReady && otherReady) || (lobby?.gameStarted ?? false);
-    if (shouldStart) {
-      navigatedRef.current = true;
-      const gameId = lobby?.gameId || lobbyCode;
-      router.push(`/game/${gameId}?hero=${myHero}`);
-    }
-  }, [meReady, otherReady, lobby?.gameStarted, lobby?.gameId, lobbyCode, myHero, router]);
 
-  // Player clicks “I’m Ready”
+  // --- Ready Up Handler ---
   const onReady = async () => {
-    if (sendingReady || meReady) return;
+    if (sendingReady || !socketRef.current) return;
     try {
       setSendingReady(true);
-      await readyUp(lobbyCode); // ✅ use your readyUp API
-      // Optional optimistic update
-      setLobby((prev) => {
-        if (!prev) return prev;
-        const updated = { ...prev };
-        updated.players = (updated.players || []).map((p) =>
-          (p.character || "").toLowerCase() === myHero
-            ? { ...p, ready: true }
-            : p
-        );
-        return updated;
-      });
+      setError("");
+      await readyUp(lobbyCode);
     } catch (e: any) {
       setError(e?.message || "Failed to ready up");
+      console.error("Ready up failed:", e);
     } finally {
       setSendingReady(false);
     }
   };
 
-  if (error) return <p className="p-6 text-red-400">{error}</p>;
-
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-800 text-white p-4"
-    style={{
-        backgroundImage: "url('/mainPage.jpg')",
-        
-      }}
-    >
+  // --- Unready Handler ---
+  const onUnready = async () => {
+    if (sendingReady || !socketRef.current) return;
+    try {
+      setSendingReady(true);
+      setError("");
+      console.log("[onUnready] Sending unready request...");
+      const result = await unready(lobbyCode);
+      console.log("[onUnready] Unready response:", result);
       
-      <h1 className="text-4xl font-bold mb-4">Lobby Room</h1>
-      <p className="text-xl mb-6">
-        Joining Lobby Code:{" "}
-        <span className="font-mono text-yellow-400">{lobbyCode}</span>
+      // Manually update local state as fallback
+      if (result && result.players) {
+        console.log("[onUnready] Manually updating lobby state");
+        setLobby(result);
+      }
+    } catch (e: any) {
+      setError(e?.message || "Failed to unready");
+      console.error("Unready failed:", e);
+    } finally {
+      setSendingReady(false);
+    }
+  };
+
+
+
+  const handleLeaveLobby = async () => {
+    if (leavingLobby || !lobbyCode) return;
+    setLeavingLobby(true);
+    setError("");
+    try {
+      await leaveLobby(lobbyCode); // Call API
+      socketRef.current?.disconnect(); // Disconnect socket
+      router.push('/dashboard'); // Go back to dashboard
+    } catch (e: any) {
+      setError(e?.message || "Failed to leave lobby");
+      console.error("Leave lobby failed:", e);
+      setLeavingLobby(false); // Re-enable button on error
+    }
+
+  };
+
+
+  // --- Render Logic ---
+  if (loadingInitial) {
+    return (
+      <div className="flex flex-col gap-4 justify-center items-center h-screen bg-gray-900">
+        <Spinner size="lg" color="primary" />
+        <p className="text-primary">Loading Lobby {lobbyCode}...</p>
+      </div>
+    );
+  }
+
+  // Handle specific "Not Found" error after loading
+  if (error && error.includes("not found")) {
+    return (
+      <div className="flex flex-col gap-4 justify-center items-center h-screen bg-gray-900 text-red-400">
+        <h1 className="text-2xl font-bold">Lobby Not Found</h1>
+        <p>{error}</p>
+        <Button color="primary" variant="bordered" onClick={() => router.push('/dashboard')}>
+          Back to Dashboard
+        </Button>
+      </div>
+    );
+  }
+
+  // Display other general errors
+  if (error) return (
+    <div className="flex flex-col gap-4 justify-center items-center h-screen bg-gray-900 text-red-400">
+      <h1 className="text-2xl font-bold">Error</h1>
+      <p>{error}</p>
+      <Button color="warning" variant="bordered" onClick={() => window.location.reload()}>
+        Try Reloading
+      </Button>
+    </div>
+  );
+
+  // Main render when lobby data is available
+  return (
+    <div
+      className="flex flex-col items-center justify-center min-h-screen bg-gray-800 text-white p-4 bg-cover bg-center"
+      style={{ backgroundImage: "url('/mainPage.jpg')" }}
+    >
+      {/* Leave Lobby Button */}
+      <Button
+        isIconOnly
+        color="danger"
+        variant="light"
+        size="sm"
+        className="absolute top-4 left-4 sm:top-6 sm:left-6 z-10"
+        onPress={handleLeaveLobby}
+        isLoading={leavingLobby}
+        aria-label="Leave Lobby"
+      >
+        {!leavingLobby && <LogOut size={20} />}
+      </Button>
+
+
+      <h1 className="text-4xl font-bold mb-2 text-shadow-md">Lobby Room</h1>
+      <p className="text-lg mb-6 bg-black/30 px-3 py-1 rounded-md">
+        Code:{" "}
+        <span className="font-mono text-yellow-400 tracking-wider">{lobbyCode}</span>
       </p>
 
-      <div className="w-full max-w-4xl p-6 bg-slate-900/70 rounded-lg shadow-xl border border-slate-700">
-        <h2 className="text-2xl font-semibold mb-6 text-center">Game Area</h2>
+      <div className="w-full max-w-4xl p-6 bg-slate-900/80 rounded-lg shadow-xl border border-slate-700 backdrop-blur-sm">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start relative">
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            {/* Vs image*/}
 
-        {/* Two panels */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-          {/* Left: You */}
-          <div className="bg-slate-900/80 rounded-xl border border-slate-700 p-6 flex flex-col items-center">
-            <p className="text-gray-300 mb-2">You</p>
-            <div className="w-48 h-48 flex items-center justify-center">
-              <img
-                src={heroSrc(myHero)}
-                alt="Your hero"
-                className="max-w-full max-h-full object-contain"
-              />
-            </div>
-            <p className="mt-3 text-lg font-semibold capitalize">{myHero}</p>
-            <p
-              className={`mt-2 text-sm ${
-                meReady ? "text-emerald-400" : "text-gray-400"
-              }`}
-            >
-              {meReady ? "Ready" : "Not ready"}
-            </p>
+            <span className="text-4xl font-bold text-blue-400/70 text-shadow-lg hidden md:block">VS</span>
           </div>
 
-          {/* Right: Opponent */}
-          <div className="bg-slate-900/80 rounded-xl border border-slate-700 p-6 flex flex-col items-center">
-            <p className="text-gray-300 mb-2">
-              {hasOpponent ? "Opponent" : "Waiting for opponent…"}
-            </p>
-
-            <div className="w-48 h-48 flex items-center justify-center">
-              {hasOpponent ? (
-                <img
-                  src={heroSrc((other?.character || "beta").toLowerCase())}
-                  alt="Opponent hero"
-                  className="max-w-full max-h-full object-contain"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center border-2 border-dashed border-slate-600 rounded-lg">
-                  <span className="text-gray-400">Join pending…</span>
-                </div>
-              )}
-            </div>
-
-            {hasOpponent && (
-              <>
-                <p className="mt-3 text-lg font-semibold capitalize">
-                  {(other?.character || "beta").toLowerCase()}
-                </p>
-                <p
-                  className={`mt-2 text-sm ${
-                    otherReady ? "text-emerald-400" : "text-gray-400"
-                  }`}
-                >
-                  {otherReady ? "Ready" : "Not ready"}
-                </p>
-              </>
-            )}
-          </div>
+          {/* Pass player object identified by ID */}
+          <PlayerPanel player={me} isMe={true} heroId={myHero} />
+          <PlayerPanel player={other} isMe={false} />
         </div>
 
-        {/* VS divider */}
-        <div className="mt-6 text-3xl font-bold text-blue-400 text-center">
-          VS
-        </div>
 
-        {/* Ready / Start UX */}
-        <div className="mt-6 flex flex-col items-center gap-3">
+        <div className="mt-8 flex flex-col items-center gap-3">
+          {/* Waiting for opponent */}
           {!hasOpponent && (
-            <p className="text-gray-300">Waiting for the second player…</p>
+            <p className="text-gray-300 animate-pulse">Waiting for opponent to join…</p>
           )}
 
+          {/* Ready button - shown when not ready and has opponent */}
           {hasOpponent && !meReady && (
-            <button
-              onClick={onReady}
-              disabled={sendingReady}
-              className="px-6 py-3 rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition font-semibold"
+            <Button
+              color="primary"
+              variant="solid"
+              size="lg"
+              isLoading={sendingReady}
+              onPress={onReady}
+              className="font-semibold shadow-lg"
             >
-              {sendingReady ? "Setting ready…" : "I’m Ready"}
-            </button>
+              {sendingReady ? "Setting ready…" : "I'm Ready"}
+            </Button>
           )}
 
-          {hasOpponent && meReady && !otherReady && (
-            <p className="text-gray-300">
-              You’re ready. Waiting for opponent…
-            </p>
-          )}
-
-          {hasOpponent && meReady && otherReady && (
-            <p className="text-emerald-400 font-semibold">
-              Both ready — starting…
-            </p>
+          {/* Unready button and waiting message - shown when ready */}
+          {hasOpponent && meReady && (
+            <>
+              <p className="text-emerald-400 font-semibold flex items-center gap-2">
+                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
+                You're ready!
+              </p>
+              {!otherReady && (
+                <p className="text-yellow-300 text-sm">Waiting for opponent…</p>
+              )}
+              <Button
+                color="warning"
+                variant="bordered"
+                size="md"
+                isLoading={sendingReady}
+                onPress={onUnready}
+                className="font-semibold"
+              >
+                {sendingReady ? "Updating…" : "Not Ready"}
+              </Button>
+              {/* At the bottom of your main render logic in LobbyPage */}
+              {hasOpponent && (
+                <Button
+                  color="success"
+                  variant="solid"
+                  onPress={async () => {
+                    try {
+                      const data = await startMatch(lobbyCode);
+                      console.log("Match started:", data);
+                      router.push(`/match/${lobbyCode}&?hero=${myHero}`);
+                    } catch (e: any) {
+                      console.error("Start match failed:", e);
+                      setError(e.message || "Failed to start match");
+                    }
+                  }}
+                >
+                  Start Match (Test)
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
     </div>
   );
+}
 
-  function heroSrc(id: string) {
-    if (id === "alpha") return "/hero1.png";
-    if (id === "beta") return "/hero2.png";
-    return "/hero1.png";
-  }
+
+// --- Updated Player Panel ---
+// Now uses player.username
+function PlayerPanel({ player, isMe, heroId }: { player: LobbyPlayer | undefined, isMe: boolean, heroId?: string }) {
+  // Determine hero based on player data first, then fallback to prop if it's "me"
+  const characterId = (player?.character || (isMe ? heroId : undefined) || "Kaiju").toLowerCase();
+  const isReady = Boolean(player?.ready);
+  const hasPlayer = Boolean(player); // Only rely on player data now for opponent
+  const displayName = isMe ? "You" : (player?.username || (hasPlayer ? "Opponent" : "Waiting..."));
+
+  return (
+    <div className={`bg-slate-900/80 rounded-xl border-2 p-6 flex flex-col items-center transition-all duration-300 ${isReady ? 'border-emerald-500 shadow-emerald-500/30 shadow-lg' : 'border-slate-700'} ${hasPlayer || isMe ? 'scale-100 opacity-100' : 'opacity-60 scale-95'}`}> {/* Improved ready state and empty state */}
+      <p className="text-gray-300 mb-2 font-semibold">{displayName}</p>
+
+      <div className="w-40 h-40 sm:w-48 sm:h-48 flex items-center justify-center">
+        {hasPlayer || isMe ? ( // Show player hero even if waiting for opponent data
+          <img
+            src={heroSrc(characterId)}
+            alt={`${displayName}'s hero`}
+            className="max-w-full max-h-full object-contain drop-shadow-lg"
+          />
+        ) : ( // Only show placeholder for opponent if 'other' is truly undefined
+          <div className="w-full h-full flex items-center justify-center border-2 border-dashed border-slate-600 rounded-lg">
+            <span className="text-gray-400 text-sm">Join pending…</span>
+          </div>
+        )}
+      </div>
+
+      {(hasPlayer || isMe) && ( // Show hero name and ready status if we know the hero
+        <>
+          <p className="mt-3 text-lg font-semibold capitalize">
+            {characterId} {/* Display the determined character */}
+          </p>
+          {/* Only show ready status if player data actually exists */}
+          {player && (
+            <p className={`mt-2 text-sm font-medium ${isReady ? "text-emerald-400 animate-pulse" : "text-gray-400"}`}>
+              {isReady ? "Ready" : "Not ready"}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+
+// Ensure this mapping is correct for your images
+function heroSrc(id: string) {
+  if (id === "kaiju") return "/hero2.png"; // Monster
+  if (id === "mech") return "/hero1.png"; // Robot
+  return "/hero2.png"; // Default or placeholder
 }

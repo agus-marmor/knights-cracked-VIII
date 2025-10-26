@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
+
 const signToken = (user) =>
   jwt.sign(
     { id: user._id, email: user.email, username: user.username },

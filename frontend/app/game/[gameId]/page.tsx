@@ -23,9 +23,10 @@ const wordList = [
 ];
 
 // --- 2. GAME CONSTANTS ---
-const MATCH_WIN_SCORE = 50; // Need to be 50 words *ahead* to win
-const GAME_TIME_LIMIT = 300; // 5 minutes (300 seconds)
+// const MATCH_WIN_SCORE = 50; // No longer needed
+const GAME_TIME_LIMIT = 60; // 60 seconds
 const SERVER_URL = "http://localhost:5000"; // Backend server URL
+const API_URL = "http://localhost:5000"; // API URL (same server)
 
 // Type for letter status
 type LetterStatus = 'pending' | 'correct' | 'incorrect';
@@ -85,6 +86,7 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
 
     /**
      * Ends the game, stops timers, and sets the result.
+     * This is NOW ONLY CALLED by the server's 'game_over' event.
      */
     const endGame = useCallback((winner: 'Player' | 'Enemy' | 'Time-Out') => {
         // Use functional update to prevent race conditions
@@ -95,37 +97,28 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
             
             if (gameTimerIntervalRef.current) clearInterval(gameTimerIntervalRef.current);
 
-            // If *we* won, tell the server
-            if (winner === 'Player' && socketRef.current && roomIdRef.current) {
-                // Calculate final WPM
-                const elapsedTime = (new Date().getTime() - (startTime || 0)) / 60000; // in minutes
-                const wpm = Math.floor(correctWords / elapsedTime) || 0;
-                
-                socketRef.current.emit('game_finished', { 
-                    roomId: roomIdRef.current, 
-                    wpm: wpm 
-                });
-            }
+            // NO LONGER EMIT 'game_finished'. Server is in charge.
             return false; // Set gameActive to false
         });
-    }, [startTime, correctWords]); // Dependencies for WPM calculation
+    }, []); // Removed dependencies
 
     // --- DERIVED STATE (Calculations) ---
     
     // Game balance is now derived from player vs opponent words
     const gameBalance = correctWords - opponentWords;
+    const matchWinScore = Math.max(correctWords, opponentWords, 25) + 5; // Dynamic "win" score for bar visuals
 
     const finalPlayerWPM = (() => {
         if (gameResult && startTime) {
-            const elapsedTime = (new Date().getTime() - startTime) / 60000; // in minutes
-            return Math.floor(correctWords / elapsedTime) || 0;
+            // Game is 1 minute (60s)
+            return correctWords;
         }
         return 0;
     })();
 
     const { playerPercent, enemyPercent } = (() => {
-        const totalPoints = MATCH_WIN_SCORE * 2;
-        const playerShare = MATCH_WIN_SCORE + gameBalance;
+        const totalPoints = matchWinScore * 2;
+        const playerShare = matchWinScore + gameBalance;
         const pPercent = Math.max(0, Math.min(100, (playerShare / totalPoints) * 100));
         return { playerPercent: pPercent, enemyPercent: 100 - pPercent };
     })();
@@ -136,7 +129,7 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
         switch (gameResult) {
             case 'Player': return { winnerText: 'You Win!', winnerColor: 'text-green-400' };
             case 'Enemy': return { winnerText: 'You Lose!', winnerColor: 'text-red-400' };
-            case 'Time-Out': return { winnerText: 'Time\'s Up!', winnerColor: 'text-yellow-400' };
+            case 'Time-Out': return { winnerText: "It's a Tie!", winnerColor: 'text-yellow-400' };
             default: return { winnerText: '', winnerColor: '' };
         }
     })();
@@ -151,8 +144,21 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
 
     // --- SOCKET.IO LOGIC ---
     useEffect(() => {
-        // Connect to the backend server
-        const newSocket = io(SERVER_URL);
+        // --- HACK for testing without auth ---
+        // In a real app, you get the logged-in user's ID from an auth context.
+        // You MUST have 2 different IDs to test multiplayer.
+        // Get two real User _id values from your MongoDB database and paste them here.
+        const FAKE_USER_ID_1 = "60f1c1b1b9b1b1b1b1b1b1b1"; // HACK: Get a real ID from your DB
+        const FAKE_USER_ID_2 = "60f1c1b1b9b1b1b1b1b1b1b2"; // HACK: Get another real ID
+        // This simple hack alternates between two users.
+        const userId = (Math.random() > 0.5) ? FAKE_USER_ID_1 : FAKE_USER_ID_2;
+        console.log("Connecting as user:", userId);
+        // --- END HACK ---
+
+        // Connect to the backend server with auth
+        const newSocket = io(SERVER_URL, {
+            auth: { userId: userId }
+        });
         socketRef.current = newSocket;
 
         // --- Event Listeners ---
@@ -186,14 +192,19 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
             setOpponentWords(data.words);
         });
         
-        newSocket.on('game_over', (data: { winnerId: string }) => {
-            const winner = data.winnerId === newSocket.id ? 'Player' : 'Enemy';
-            endGame(winner);
+        // Updated 'game_over' listener
+        newSocket.on('game_over', (data: { winnerId: string | null, isTie: boolean }) => {
+            if (data.isTie) {
+                endGame('Time-Out'); // Use 'Time-Out' to signify a tie
+            } else {
+                const winner = data.winnerId === newSocket.id ? 'Player' : 'Enemy';
+                endGame(winner);
+            }
         });
         
         newSocket.on('opponent_left', () => {
              console.log("Opponent disconnected");
-             // Give the player the win if the opponent leaves
+             // Give the player the win if the opponent leaves before game ends
              endGame('Player'); 
         });
 
@@ -210,9 +221,10 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
             gameTimerIntervalRef.current = setInterval(() => {
                 setTimeRemaining(prevTime => {
                     if (prevTime <= 1) {
-                        // Time-out logic
-                        const balance = correctWords - opponentWords;
-                        endGame(balance > 0 ? 'Player' : (balance < 0 ? 'Enemy' : 'Time-Out'));
+                        // Time's up on the client.
+                        // Stop the timer, but DO NOT end the game.
+                        // Wait for the server's 'game_over' event.
+                        if (gameTimerIntervalRef.current) clearInterval(gameTimerIntervalRef.current);
                         return 0;
                     }
                     
@@ -230,7 +242,7 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
         return () => {
             if (gameTimerIntervalRef.current) clearInterval(gameTimerIntervalRef.current);
         };
-    }, [gameActive, startTime, correctKeystrokes, correctWords, opponentWords, endGame]);
+    }, [gameActive, startTime, correctKeystrokes]); // Removed dependencies that would restart timer
 
     // --- Scroll Logic ---
     useEffect(() => {
@@ -245,22 +257,8 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
         }
     }, [currentLetterIndex]);
 
-    // --- [NEW] Effect to Save Score on Game End ---
-    useEffect(() => {
-        if (gameResult && startTime) {
-            // Game has just ended
-            const finalWPM = Math.floor(correctWords / ((new Date().getTime() - startTime) / 60000)) || 0;
-            const didWin = gameResult === 'Player';
-            
-            // Call the new API function to save the score
-            savePlayerScore({
-                name: "Anonymous", // No auth yet, so send default
-                matches: 1, // This game (backend should ideally increment)
-                wpm: finalWPM,
-                winRate: didWin ? 100 : 0 // Simple win/loss (backend should calculate)
-            });
-        }
-    }, [gameResult, startTime, correctWords]);
+    // --- 'savePlayerScore' useEffect REMOVED ---
+    // The backend now handles saving scores for multiplayer games.
 
     // --- EVENT HANDLERS ---
 
@@ -308,11 +306,8 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
                     });
                 }
                 
-                // Check for win based on new balance
-                const newBalance = newWordCount - opponentWords;
-                if (newBalance >= MATCH_WIN_SCORE) {
-                    endGame('Player');
-                }
+                // --- 'MATCH_WIN_SCORE' check REMOVED ---
+                // Client no longer decides the winner.
             }
 
         } else {
@@ -326,9 +321,10 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
         if (currentLetterIndex < textToType.length - 1) {
             setCurrentLetterIndex(prevIndex => prevIndex + 1);
         } else {
-             // Finished text
-             const newBalance = correctWords - opponentWords;
-             endGame(newBalance > 0 ? 'Player' : (newBalance < 0 ? 'Enemy' : 'Time-Out'));
+             // Finished text, but game continues until timer is up.
+             // Do nothing, just keep going.
+             // Or, we could just loop the text? For now, nothing.
+             setCurrentLetterIndex(prevIndex => prevIndex + 1); // Go past end
         }
     };
 
@@ -438,12 +434,10 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
                                 <div className="text-sm text-gray-400">Your Final WPM</div>
                                 <div className="text-4xl font-mono font-bold text-cyan-400">{finalPlayerWPM}</div>
                             </div>
-                            {/* Opponent WPM is not known by the client
                             <div className="p-4">
-                                <div className="text-sm text-gray-400">Opponent WPM</div>
-                                <div className="text-4xl font-mono font-bold text-red-400">??</div>
+                                <div className="text-sm text-gray-400">Opponent's WPM</div>
+                                <div className="text-4xl font-mono font-bold text-red-400">{opponentWords}</div>
                             </div>
-                            */}
                         </div>
                         {/* Modal Buttons */}
                         <div className="flex flex-col sm:flex-row gap-4">
@@ -474,7 +468,7 @@ const TypingGame: React.FC<{ onViewLeaderboard: () => void }> = ({ onViewLeaderb
  * Fetches the leaderboard data from the API
  */
 async function getLeaderboard(): Promise<any[]> {
-    const res = await fetch("http://localhost:5000/api/leaderboard", {
+    const res = await fetch(`${API_URL}/api/leaderboard`, {
       method: "GET",
       credentials: "include",
     });
@@ -486,11 +480,12 @@ async function getLeaderboard(): Promise<any[]> {
 } 
 
 /**
- * [NEW] Saves the player's score to the backend
+ * Saves the player's score to the backend
+ * (This is now only used for AI mode, which is not active in this file)
  */
 async function savePlayerScore(score: { name: string, matches: number, wpm: number, winRate: number }): Promise<void> {
     try {
-        const res = await fetch("http://localhost:5000/api/score", {
+        const res = await fetch(`${API_URL}/api/score`, {
             method: "POST",
             credentials: "include",
             headers: {
@@ -554,7 +549,7 @@ const LeaderboardDisplay: React.FC = () => {
                 
                 // Map API data to our LeaderboardEntry type, adding rank
                 const rankedData = data.map((item, index) => ({
-                    id: item._id || `user-${index}`, // Use _id from MongoDB
+                    id: item.id || `user-${index}`, // Use id from backend map
                     rank: index + 1,
                     name: item.name || 'Anonymous',
                     matches: item.matches || 0,
@@ -563,7 +558,7 @@ const LeaderboardDisplay: React.FC = () => {
                 }));
                 
                 setLeaderboard(rankedData);
-            } catch (err: any) {
+            } catch (err: any) { // <-- FIX: Added curly braces
                 setError(err.message || "Failed to fetch leaderboard.");
             } finally {
                 setIsLoading(false);
@@ -621,7 +616,7 @@ const LeaderboardDisplay: React.FC = () => {
                         <th scope="col" className="px-6 py-4 font-semibold text-white text-center w-2/12">
                             WPM
                         </th>
-                        <th scope="col" className="px-6 py-4 font-semibold text-white text-center w-2/12">
+                        <th scope="col" className="px-6 py-4 font-semibold text-white text-center w-2/12"> {/* <-- FIX: Removed invalid classType prop */}
                             Win Rate
                         </th>
                         </tr>

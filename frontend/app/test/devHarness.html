@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Match Harness</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; margin:20px; }
+    .row { display:flex; gap:12px; margin-bottom:12px; flex-wrap: wrap; }
+    .hpbar { height:16px; background:#e5e7eb; border-radius:8px; overflow:hidden }
+    .hpfill { height:100%; background:#22c55e }
+    .word { margin-right:8px; }
+    .done { color:#9ca3af }
+    .current { background:#fde68a }
+    .panel { border:1px solid #e5e7eb; border-radius:10px; padding:12px; }
+  </style>
+</head>
+<body>
+  <h1>Match Dev Harness</h1>
+
+  <div class="row">
+    <label>Backend URL <input id="url" size="30" value="http://localhost:5000"></label>
+    <label>Lobby Code <input id="code" maxlength="5" size="6" placeholder="ABCDE"></label>
+  </div>
+  <div class="row">
+    <label>JWT (your user) <input id="token" size="60" placeholder="Bearer not needed"></label>
+    <button id="connect">Connect</button>
+  </div>
+
+  <div class="row">
+    <button id="subLobby">Subscribe Lobby</button>
+    <button id="subMatch">Subscribe Match</button>
+    <button id="assignPrompt">Assign Prompt</button>
+    <button id="start">Start Match</button>
+  </div>
+
+  <div class="panel">
+    <div><b>Status:</b> <span id="status">disconnected</span></div>
+    <div><b>Prompt:</b> <span id="prompt">(none)</span></div>
+  </div>
+
+  <div class="row">
+    <div class="panel" style="flex:1; min-width:280px">
+      <div><b>Me</b> <span id="meName"></span> — <span id="meHP">100</span>%</div>
+      <div class="hpbar"><div id="meBar" class="hpfill" style="width:100%"></div></div>
+    </div>
+    <div class="panel" style="flex:1; min-width:280px">
+      <div><b>Opponent</b> <span id="oppName"></span> — <span id="oppHP">100</span>%</div>
+      <div class="hpbar"><div id="oppBar" class="hpfill" style="width:100%"></div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div id="words"></div>
+    <input id="input" placeholder="type word then Space/Enter" style="width:100%; padding:10px; font-size:18px; margin-top:10px;" />
+  </div>
+
+  <pre id="log" style="background:#0b1020;color:#cbd5e1;padding:10px;border-radius:10px;height:220px;overflow:auto"></pre>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const log = (...a) => { const l=$("log"); l.textContent += a.join(" ") + "\n"; l.scrollTop=l.scrollHeight; };
+    let socket, me = {}, opponent = {}, words = [], myIndex = 0, hp = {}, matchStatus = "unknown";
+
+    function renderHP() {
+      const myHP = hp[me.id] ?? 100, oppHP = hp[opponent.id] ?? 100;
+      $("meHP").textContent = myHP; $("oppHP").textContent = oppHP;
+      $("meBar").style.width = Math.max(0, Math.min(100, myHP)) + "%";
+      $("oppBar").style.width = Math.max(0, Math.min(100, oppHP)) + "%";
+    }
+    function renderWords() {
+      const c = $("words"); c.innerHTML = "";
+      words.forEach((w,i) => {
+        const span = document.createElement("span");
+        span.textContent = w;
+        span.className = "word" + (i < myIndex ? " done" : i === myIndex ? " current" : "");
+        c.appendChild(span);
+      });
+    }
+
+    $("connect").onclick = () => {
+      const URL = $("url").value.trim();
+      const token = $("token").value.trim();
+      socket = io(URL, { auth: { token }, withCredentials: true });
+
+      socket.on("connect", () => { $("status").textContent = "connected"; log("[client] connected", socket.id); });
+      socket.on("connect_error", (e) => { $("status").textContent = "connect_error"; log("[client] connect_error:", e.message); });
+
+      // Lobby
+      socket.on("lobby:update", (snap) => { log("[lobby:update]", JSON.stringify(snap)); });
+      socket.on("lobby:presence", (p) => { log("[lobby:presence]", JSON.stringify(p)); });
+
+      // Match snapshots
+      socket.on("match:update", (m) => {
+        matchStatus = m.status;
+        $("status").textContent = "match:" + m.status;
+        $("prompt").textContent = m.promptText || "(none)";
+        words = (m.promptText || "").trim().split(/\s+/);
+        // identify me/opponent from token payload if available server-side, else pick first two players
+        if (m.players && m.players.length >= 1) {
+          // if your backend puts username in socket.user, you can also fetch /api/me; here we just choose first as "me" for demo
+          me = me.id ? me : m.players[0];
+          opponent = m.players.find(p => p.userId !== me.userId) || m.players[0];
+          me.id = me.userId; opponent.id = opponent.userId;
+          $("meName").textContent = me.username || me.userId;
+          $("oppName").textContent = opponent.username || opponent.userId;
+        }
+        renderWords();
+      });
+      socket.on("match:countdown", ({ secs }) => log("[countdown]", secs));
+      socket.on("match:started", ({ startedAt }) => log("[started]", startedAt));
+      socket.on("match:progress", (p) => log("[progress]", JSON.stringify(p)));
+      socket.on("match:finished", (r) => { log("[finished]", JSON.stringify(r)); alert("Winner: " + r.winnerUserId); });
+
+      // HP / runtime
+      socket.on("hp:sync", ({ hp: h }) => { hp = h; renderHP(); log("[hp:sync]", JSON.stringify(h)); });
+      socket.on("hp:update", ({ hp: h, wordIndex }) => {
+        hp = h || hp;
+        if (wordIndex && me.id in wordIndex) myIndex = wordIndex[me.id];
+        renderHP(); renderWords();
+        log("[hp:update]", JSON.stringify({ hp, wordIndex }));
+      });
+    };
+
+    $("subLobby").onclick = () => socket?.emit("lobby:subscribe", { code: $("code").value.trim() });
+    $("subMatch").onclick = () => socket?.emit("match:subscribe", { code: $("code").value.trim() });
+
+    $("assignPrompt").onclick = async () => {
+      const r = await fetch($("url").value.trim() + "/api/matches/" + $("code").value.trim() + "/prompt", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + $("token").value.trim() }
+      });
+      log("[assignPrompt]", r.status, await r.text());
+    };
+
+    $("start").onclick = async () => {
+      // call your existing startMatch route
+      const r = await fetch($("url").value.trim() + "/api/lobbies/" + $("code").value.trim() + "/start", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + $("token").value.trim() }
+      });
+      log("[startMatch]", r.status, await r.text());
+    };
+
+    // typing: submit word on Space/Enter
+    $("input").addEventListener("keydown", (e) => {
+      if (e.key === " " || e.key === "Enter") {
+        const typed = $("input").value.trim();
+        const expected = words[myIndex] || "";
+        if (typed && expected && typed === expected) {
+          socket?.emit("word:complete", { code: $("code").value.trim(), typed });
+          // optional: also send progress for your WPM system
+          // socket?.emit("progress:update", { code: $("code").value.trim(), charsTyped: ???, errors: 0, finished: false });
+          $("input").value = "";
+          myIndex++;
+          renderWords();
+        }
+        e.preventDefault();
+      }
+    });
+  </script>
+</body>
+</html>

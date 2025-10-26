@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getToken, logout } from "@/lib/auth";
 
-import { getUsername, createLobby, getLobby } from "@/lib/api";
+import { getUsername, createLobby, getLobby, joinLobby } from "@/lib/api";
 
 
 import {
@@ -106,7 +106,8 @@ export default function DashboardPage() {
     try {
       setJoinError(null);
       setIsJoiningLobby(true);
-      await getLobby(code);          // throws if invalid/closed/unauthorized
+      await joinLobby(code);         // attempt to join lobby
+      
       router.push(`/lobby/${code}`); // go to lobby where other user is
     } catch (err: any) {
       setJoinError(err?.message || "Invalid or unavailable code.");
@@ -169,7 +170,7 @@ export default function DashboardPage() {
 
             {/* ... other buttons ... */}
 
-            <Button color="primary" variant="bordered" className="w-64 font-semibold" startContent={<Trophy size={18}/>}> View Leaderboard </Button>
+            <Button color="primary" variant="bordered" className="w-64 font-semibold" startContent={<Trophy size={18}/>} onPress={()=>router.push("/leaderboard")}> View Leaderboard </Button>
           </div>
         </CardBody>
       </Card>

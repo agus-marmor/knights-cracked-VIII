@@ -3,7 +3,7 @@ import { requireAuth } from "../middleware/auth.js";
 import multer from 'multer';
 import {getUsername, getProfile, updateAvatar, deleteUser  } from "../controllers/user.controller.js";
 import mongoose from "mongoose";
-
+import { ensureGridfsReady } from '../middleware/gridfsready.js';
 const storage = multer.memoryStorage();
 const upload = multer({
   storage: storage,
@@ -20,7 +20,7 @@ const router = express.Router();
 
 router.get("/username", requireAuth, getUsername);
 
-router.patch("/avatar", requireAuth,upload.single('avatar'), updateAvatar);
+router.patch("/avatar", requireAuth,ensureGridfsReady,upload.single('avatar'), updateAvatar);
 
 router.get('/avatar/:fileId', async (req, res) => {
 
