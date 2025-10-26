@@ -55,6 +55,36 @@ function calculateAccuracy(typed: string, prompt: string) {
   return Math.round(Math.max(0, 100 * (1 - errors / typed.length)));
 }
 
+// NEW: build overlay HTML with 1ch boxes per character so wrapping matches textarea exactly
+function buildOverlayHtml(promptText: string, typedText: string) {
+  if (!promptText) return "";
+  const parts: string[] = [];
+  for (let i = 0; i < promptText.length; i++) {
+    const ch = promptText[i];
+    const typedCh = typedText[i];
+    // render spaces as NBSP so they occupy width even at line ends
+    const esc = ch === " "
+      ? "&nbsp;"
+      : ch === "&" ? "&amp;"
+      : ch === "<" ? "&lt;"
+      : ch === ">" ? "&gt;"
+      : ch === '"' ? "&quot;"
+      : ch === "'" ? "&#039;"
+      : ch;
+
+    let cls = "opacity-50";
+    if (typedCh !== undefined) {
+      cls = typedCh === ch ? "text-emerald-400" : "text-rose-400 underline";
+    }
+
+    // fixed 1ch box to avoid trailing-space collapse and ensure identical wrapping
+    parts.push(
+      `<span class="${cls}" style="display:inline-block;width:1ch;box-sizing:border-box;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,'Roboto Mono','Courier New',monospace;font-size:18px;line-height:24px;white-space:pre;">${esc}</span>`
+    );
+  }
+  return parts.join("");
+}
+
 export default function MatchPage() {
   const { code } = useParams<{ code: string }>();
   const search = useSearchParams();
@@ -191,7 +221,31 @@ export default function MatchPage() {
       console.log("[match:started]", startedAt);
       setCountdown(null);
       setStartedAt(new Date(startedAt));
+
+      // autofocus textarea when match actually starts
+      requestAnimationFrame(() => {
+        if (textAreaRef.current) {
+          try {
+            textAreaRef.current.focus();
+            // place caret at end
+            const len = textAreaRef.current.value.length;
+            textAreaRef.current.setSelectionRange(len, len);
+          } catch (err) {
+            /* ignore focus errors */
+          }
+        }
+      });
     });
+
+    // clean up on page unload to avoid stale sockets
+    const onBeforeUnload = () => {
+      try {
+        s.emit("match:unsubscribe", { code });
+        s.emit("lobby:unsubscribe", { code });
+      } catch (_) {}
+      try { s.disconnect(); } catch (_) {}
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
 
     // Update progress from other players
     s.on("match:progress", (payload: any) => {
@@ -239,6 +293,7 @@ export default function MatchPage() {
       s.disconnect();
       setSocket(null);
       socketRef.current = null; // <- clear ref
+      window.removeEventListener("beforeunload", onBeforeUnload);
     };
   }, [code]);
 
@@ -321,6 +376,22 @@ export default function MatchPage() {
     });
   }, []);
 
+  // track first outstanding error (user cannot type past firstErrorIndex + 1)
+  const firstErrorIndexRef = useRef<number | null>(null);
+
+  // track indices that were ever typed incorrectly so accuracy counts them even after fixing
+  const errorIndicesRef = useRef<Set<number>>(new Set());
+  const [errorsTotal, setErrorsTotal] = useState<number>(0);
+  const prevTypedRef = useRef<string>("");
+
+  // reset error tracking when prompt/match resets
+  useEffect(() => {
+    errorIndicesRef.current.clear();
+    setErrorsTotal(0);
+    prevTypedRef.current = "";
+    setTyped("");
+  }, [prompt, code]);
+
   // Handle typing
   const onType = useCallback(
     async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -339,8 +410,8 @@ export default function MatchPage() {
         return;
       }
 
-      // Allow typing until server confirms match is finished
-      if (match?.status === "finished") {
+      // Block typing during finished OR countdown states
+      if (match?.status === "finished" || match?.status === "countdown" || countdown !== null) {
         console.log("[onType] Blocked - match finished by server");
         return;
       }
@@ -352,10 +423,47 @@ export default function MatchPage() {
         setStartedAt(localStartedAt);
       }
 
-      const value = e.target.value.slice(0, maxLen);
+      // strip newlines (prevent multi-line mismatches)
+      let raw = e.target.value.replace(/\r?\n/g, "");
+      let value = raw.slice(0, maxLen);
+
+      // --- NEW: detect first mismatch & clamp to allowed length ---
+      const errorsSet = errorIndicesRef.current;
+      let firstMismatch: number | null = null;
+      for (let i = 0; i < value.length; i++) {
+        const typedCh = value[i];
+        const expected = prompt[i] ?? "";
+        if (typedCh !== expected) {
+          // record cumulative error
+          if (!errorsSet.has(i)) errorsSet.add(i);
+          // first mismatch if not set
+          if (firstMismatch === null) firstMismatch = i;
+        }
+      }
+      // persist cumulative errors count
+      const errorsTotalNow = errorsSet.size;
+      setErrorsTotal(errorsTotalNow);
+
+      // If there is a first outstanding mismatch, clamp the typed value so the user
+      // can type that incorrect char but not advance beyond it (i.e., allow length <= i+1).
+      if (firstMismatch !== null) {
+        firstErrorIndexRef.current = firstMismatch;
+        const allowedLen = firstMismatch + 1;
+        if (value.length > allowedLen) {
+          value = value.slice(0, allowedLen);
+        }
+      } else {
+        // no outstanding mismatch
+        firstErrorIndexRef.current = null;
+      }
+      // --- END NEW ---
+
+      // store prev typed for next diff
+      prevTypedRef.current = value;
+
       setTyped(value);
 
-      const errors = countErrors(prompt.slice(0, value.length), value);
+      const errorsNow = countErrors(prompt.slice(0, value.length), value);
       const isFinished = value.length >= maxLen;
 
       // Set finished state immediately
@@ -373,7 +481,7 @@ export default function MatchPage() {
           await emitWithAck("progress:update", {
             code,
             charsTyped: value.length,
-            errors,
+            errors: errorsTotalNow,
             finished: true,
           }, 1000);
           console.log("[onType] final progress:update ack received");
@@ -383,7 +491,7 @@ export default function MatchPage() {
           s.emit("progress:update", {
             code,
             charsTyped: value.length,
-            errors,
+            errors: errorsTotalNow,
             finished: true,
           });
         }
@@ -391,11 +499,13 @@ export default function MatchPage() {
         // Prepare finish payload WITHOUT client userId (server attaches socket user)
         const finishedAt = new Date();
         const wpm = calculateWpm(value, localStartedAt);
+        // use cumulative errorsTotal for client-side accuracy (server computes authoritative one)
+        const clientAcc = value.length > 0 ? Math.round(Math.max(0, 100 * (1 - errorsTotalNow / maxLen))) : 100;
         const acc = calculateAccuracy(value, prompt);
         const finishPayload = {
           code,
           charsTyped: value.length,
-          errors,
+          errors: errorsTotalNow,
           finished: true,
           startedAt: localStartedAt?.toISOString?.() ?? null,
           finishedAt: finishedAt.toISOString(),
@@ -417,7 +527,7 @@ export default function MatchPage() {
         s.emit("progress:update", {
           code,
           charsTyped: value.length,
-          errors,
+          errors: errorsTotalNow,
           finished: false,
         });
       }
@@ -428,29 +538,159 @@ export default function MatchPage() {
           promptScrollRef.current.scrollTop = textAreaRef.current.scrollTop;
         }
       });
-
     },
-    // note: using socketRef and sendFinishWithRetry so we avoid depending on socket state directly
-    [prompt, finished, code, maxLen, startedAt, match, myUserId, sendFinishWithRetry, emitWithAck]
+    // update deps: include prompt in deps and errorsTotal (for clientAcc usage)
+    [prompt, finished, code, maxLen, startedAt, match, myUserId, sendFinishWithRetry, emitWithAck, countdown]
   );
 
+  // Handle keydown for special keys
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter') {
+      // Prevent Enter entirely
+      if (e.key === "Enter") {
         e.preventDefault();
+        return;
+      }
+
+      // Block navigation/edits while countdown/finished
+      if (match?.status === "finished" || match?.status === "countdown" || countdown !== null) {
+        e.preventDefault();
+        return;
+      }
+
+      const ta = textAreaRef.current;
+      if (!ta) return;
+
+      const s = socketRef.current;
+
+      // Helper to emit current progress
+      const emitProgress = (value: string) => {
+        const errorsTotalNow = errorIndicesRef.current.size;
+        if (s) {
+          s.emit("progress:update", {
+            code,
+            charsTyped: value.length,
+            errors: errorsTotalNow,
+            finished: value.length >= maxLen,
+          });
+        }
+      };
+
+      // NEW: prevent typing beyond allowed length for printable keys
+      const firstErr = firstErrorIndexRef.current;
+      const allowedLen = firstErr !== null ? firstErr + 1 : maxLen;
+      // detect printable character (single length and not control/meta/alt)
+      const isPrintable =
+        e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
+      if (isPrintable) {
+        const start = ta.selectionStart ?? 0;
+        const end = ta.selectionEnd ?? start;
+        // If selection will be replaced, compute resulting length; otherwise it's a simple insert
+        const resultingLen = typed.length - (end - start) + 1;
+        if (resultingLen > allowedLen) {
+          // block forward typing until mistake is fixed
+          e.preventDefault();
+          return;
+        }
+      }
+
+      // Backspace handling: remove selected range or char before caret
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        const start = ta.selectionStart ?? 0;
+        const end = ta.selectionEnd ?? start;
+        if (start === 0 && end === 0) return;
+
+        const before = typed.slice(0, start);
+        const after = typed.slice(end);
+        // remove one char before caret if no selection
+        const newValue = start === end ? before.slice(0, -1) + after : before + after;
+        // update cumulative error indices: drop indices >= new length
+        const errorsSet = errorIndicesRef.current;
+        for (const idx of Array.from(errorsSet)) {
+          if (idx >= newValue.length) errorsSet.delete(idx);
+        }
+        setErrorsTotal(errorsSet.size);
+        prevTypedRef.current = newValue;
+        setTyped(newValue);
+        // place caret
+        const pos = Math.max(0, start === end ? start - 1 : start);
+        requestAnimationFrame(() => ta.setSelectionRange(pos, pos));
+        emitProgress(newValue);
+        return;
+      }
+
+      // Delete handling: remove selected range or char at caret
+      if (e.key === "Delete") {
+        e.preventDefault();
+        const start = ta.selectionStart ?? 0;
+        const end = ta.selectionEnd ?? start;
+        if (start >= typed.length && start === end) return;
+
+        const before = typed.slice(0, start);
+        const after = typed.slice(end === start ? start + 1 : end);
+        const newValue = before + after;
+        const errorsSet = errorIndicesRef.current;
+        for (const idx of Array.from(errorsSet)) {
+          if (idx >= newValue.length) errorsSet.delete(idx);
+        }
+        setErrorsTotal(errorsSet.size);
+        prevTypedRef.current = newValue;
+        setTyped(newValue);
+        const pos = start;
+        requestAnimationFrame(() => ta.setSelectionRange(pos, pos));
+        emitProgress(newValue);
+        return;
+      }
+
+      // Arrow/Home/End: allow default but clamp caret if it goes past typed length
+      if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+        setTimeout(() => {
+          const pos = ta.selectionStart ?? 0;
+          if (pos > typed.length) {
+            ta.setSelectionRange(typed.length, typed.length);
+          }
+        }, 0);
+        return;
       }
     },
-    []
+    [typed, prompt, match, countdown, code, maxLen]
   );
 
-  const onLeave = useCallback(() => router.push("/dashboard"), [router]);
+  // compute client-side immediate accuracy using cumulative errors
+  // Use prompt length (maxLen) as denominator so correcting mistakes later
+  // does not increase accuracy — errors are permanent penalties.
+  const clientAccuracy = maxLen > 0 ? Math.round(Math.max(0, 100 * (1 - (errorsTotal / maxLen)))) : 100;
 
   const myServerWpm = me?.wpm ?? calculateWpm(typed, startedAt);
-  const myServerAcc = me?.accuracy ?? calculateAccuracy(typed, prompt);
+  // prefer server accuracy if available, otherwise show client cumulative accuracy
+  const myServerAcc = me?.accuracy ?? clientAccuracy;
+
   const myProgressPct = maxLen > 0 ? Math.floor(((me?.charsTyped ?? typed.length) / maxLen) * 100) : 0;
   const oppProgressPct = maxLen > 0 ? Math.floor(((opponent?.charsTyped ?? 0) / maxLen) * 100) : 0;
 
   const iWon = (winnerUserId ?? match?.winnerUserId ?? null) === String(myUserId);
+
+  const overlayHtml = useMemo(() => buildOverlayHtml(prompt, typed), [prompt, typed]);
+
+  // replace onLeave to notify server and disconnect socket before navigating
+  const onLeave = useCallback(() => {
+    const s = socketRef.current;
+    try {
+      const up = code?.toUpperCase();
+      if (s && up) {
+        s.emit("match:unsubscribe", { code: up });
+        s.emit("lobby:unsubscribe", { code: up });
+        // give server a brief moment to process then disconnect
+        setTimeout(() => {
+          try { s.disconnect(); } catch (_) {}
+        }, 100);
+      }
+    } catch (err) {
+      console.warn("[onLeave] error while emitting unsubscribe:", err);
+    }
+    router.push("/dashboard");
+  }, [router, code]);
 
   return (
     <div
@@ -494,34 +734,22 @@ export default function MatchPage() {
           {/* Prompt overlay */}
           <pre
             ref={promptScrollRef}
-            className="absolute top-0 left-0 w-full h-full pointer-events-none font-mono text-lg leading-6 whitespace-pre-wrap break-words overflow-y-auto z-20"
+            className="absolute top-0 left-0 w-full h-full pointer-events-none font-mono text-lg leading-6 whitespace-pre-wrap overflow-y-auto z-20"
             style={{
               padding: '0.75rem',
               margin: 0,
-              wordBreak: 'break-word',
-              overflowWrap: 'break-word'
+              // break per character so overlay and textarea wrap identically with 1ch boxes
+              wordBreak: 'break-all',
+              overflowWrap: 'anywhere',
+              boxSizing: 'border-box',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace',
+              fontSize: '18px',
+              lineHeight: '24px',
+              letterSpacing: 'normal',
+              fontVariantLigatures: 'none'
             }}
-          >
-            {prompt.split("").map((ch, i) => {
-              const typedCh = typed[i];
-              const correct = typedCh === undefined ? undefined : typedCh === ch;
-
-              return (
-                <span
-                  key={i}
-                  className={
-                    correct === undefined
-                      ? "opacity-50"
-                      : correct
-                        ? "text-emerald-400"
-                        : "text-rose-400 underline"
-                  }
-                >
-                  {ch}
-                </span>
-              );
-            })}
-          </pre>
+            dangerouslySetInnerHTML={{ __html: overlayHtml }}
+          />
 
           {/* Textarea */}
           <textarea
@@ -529,30 +757,88 @@ export default function MatchPage() {
             value={typed}
             onChange={onType}
             onKeyDown={onKeyDown}
+            onPaste={(e) => {
+              // sanitize pasted content: remove newlines, clamp to maxLen, update UI & emit progress/finish
+              e.preventDefault();
+              const pasted = (e.clipboardData || (window as any).clipboardData).getData("text").replace(/\r?\n/g, "");
+              const base = textAreaRef.current?.value ?? "";
+              let combined = (base + pasted).slice(0, maxLen);
+
+              // update cumulative error indices for pasted content
+              const errorsSet = errorIndicesRef.current;
+              for (let i = 0; i < combined.length; i++) {
+                const typedCh = combined[i];
+                const expected = prompt[i] ?? "";
+                if (typedCh !== expected && !errorsSet.has(i)) errorsSet.add(i);
+              }
+              const errorsTotalNow = errorsSet.size;
+              setErrorsTotal(errorsTotalNow);
+
+              setTyped(combined);
+              const isFinished = combined.length >= maxLen;
+              const s = socketRef.current;
+              if (!s) return;
+
+              // emit final progress if finished, otherwise normal progress (send cumulative errors)
+              s.emit("progress:update", {
+                code,
+                charsTyped: combined.length,
+                errors: errorsTotalNow,
+                finished: isFinished,
+              });
+
+              if (isFinished) {
+                const finishedAt = new Date();
+                const wpm = calculateWpm(combined, startedAt ?? new Date());
+                const acc = calculateAccuracy(combined, prompt);
+                const finishPayload = {
+                  code,
+                  charsTyped: combined.length,
+                  errors: errorsTotalNow,
+                  finished: true,
+                  startedAt: (startedAt ?? new Date()).toISOString(),
+                  finishedAt: finishedAt.toISOString(),
+                  wpm,
+                  accuracy: acc,
+                };
+                // try ack first, fallback to retry
+                emitWithAck("match:finish", finishPayload, 1500).catch(() => sendFinishWithRetry(finishPayload, 3));
+                setFinished(true);
+              }
+            }}
             onScroll={(e) => {
               if (promptScrollRef.current) {
                 promptScrollRef.current.scrollTop = e.currentTarget.scrollTop;
               }
             }}
-            disabled={finished}
+            disabled={finished || match?.status === "countdown" || countdown !== null}
             spellCheck={false}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
             wrap="soft"
-            className="absolute top-0 left-0 w-full h-full font-mono text-lg leading-6 bg-transparent border-none focus:outline-none resize-none z-10 caret-white text-transparent overflow-y-auto"
+            className="absolute top-0 left-0 w-full h-full font-mono text-lg leading-6 bg-transparent border-none focus:outline-none resize-none z-10 caret-white text-transparent overflow-y-auto whitespace-pre-wrap box-border"
             style={{
               padding: '0.75rem',
               margin: 0,
               caretColor: 'white',
-              wordBreak: 'break-word',
-              overflowWrap: 'break-word'
+              // match overlay: break per character
+              wordBreak: 'break-all',
+              overflowWrap: 'anywhere',
+              whiteSpace: 'pre-wrap',
+              boxSizing: 'border-box',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace',
+              fontSize: '18px',
+              lineHeight: '24px',
+              letterSpacing: 'normal',
+              fontVariantLigatures: 'none'
             }}
           />
         </div>
 
         <div className="text-xs opacity-70 mt-1">
-          {me?.errors ?? countErrors(prompt.slice(0, typed.length), typed)} errors
+          {/* Show cumulative errors made so far (even if fixed) */}
+          {me?.errors ?? errorsTotal ?? countErrors(prompt.slice(0, typed.length), typed)} errors
         </div>
 
         {/* Progress */}
@@ -577,21 +863,15 @@ export default function MatchPage() {
       {/* --- RESULTS MODAL --- */}
       <Modal isOpen={finished || match?.status === "finished"} onClose={onLeave}>
         <ModalContent className="bg-slate-800 text-white border border-slate-700">
-          <ModalHeader>
-            <h2 className={`text-3xl font-bold ${iWon ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {iWon ? "🏆 You Win!" : "Better Luck Next Time"}
+          {/* center header content so the title sits perfectly centered */}
+          <ModalHeader className="flex justify-center">
+            <h2 className={`text-3xl text-center font-bold ${iWon ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {iWon ? "You Win!" : "You Lose!"}
             </h2>
           </ModalHeader>
           <ModalBody>
             <div className="space-y-6 py-4">
-              {/* Debug info - you can remove this after testing */}
-              <div className="text-xs text-slate-400 font-mono bg-slate-900/50 p-2 rounded">
-                <div>Match Status: {match?.status}</div>
-                <div>Winner ID: {match?.winnerUserId}</div>
-                <div>My ID: {myUserId}</div>
-                <div>Me: finished={me?.finished ? 'Yes' : 'No'}, wpm={me?.wpm}, acc={me?.accuracy}%</div>
-                <div>Opp: finished={opponent?.finished ? 'Yes' : 'No'}, wpm={opponent?.wpm}, acc={opponent?.accuracy}%</div>
-              </div>
+
 
               {/* Stats Comparison */}
               <div className="grid grid-cols-2 gap-4 text-center">
