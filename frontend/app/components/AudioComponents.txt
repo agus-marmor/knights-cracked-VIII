@@ -1,0 +1,66 @@
+/*"use client";
+import { useEffect, useRef } from "react";
+
+// --- Helper functions ---
+type Options = { volume?: number; loop?: boolean };
+
+function makeSfx(src: string, opts: Options = {}) {
+  const a = new Audio(src);
+  a.preload = "auto";
+  a.volume = opts.volume ?? 1;
+  a.loop = !!opts.loop;
+  return a;
+}
+
+function playOneShot(src: string, volume = 1) {
+  const a = new Audio(src);
+  a.volume = volume;
+  a.play().catch(() => {
+    // ignored if user hasn’t interacted yet
+  });
+}
+
+// --- Main Component ---
+export default function AudioManager() {
+  const bgmRef = useRef<HTMLAudioElement | null>(null);
+  const clickRef = useRef<HTMLAudioElement | null>(null);
+  const punchRef = useRef<HTMLAudioElement | null>(null);
+  const beepRef = useRef<HTMLAudioElement | null>(null);
+
+  // preload all audio files
+  useEffect(() => {
+    bgmRef.current   = makeSfx("/sounds/bgm_loop.mp3", { volume: 0.25, loop: true });
+    clickRef.current = makeSfx("/sounds/click.mp3",     { volume: 0.8 });
+    punchRef.current = makeSfx("/sounds/punch.wav",     { volume: 0.9 });
+    beepRef.current  = makeSfx("/sounds/countdown_beep.mp3", { volume: 1 });
+  }, []);
+
+  // start bgm after user gesture (browser rule)
+  useEffect(() => {
+    const onFirstGesture = () => {
+      bgmRef.current?.play().catch(() => {});
+      window.removeEventListener("pointerdown", onFirstGesture);
+      window.removeEventListener("keydown", onFirstGesture);
+    };
+    window.addEventListener("pointerdown", onFirstGesture);
+    window.addEventListener("keydown", onFirstGesture);
+    return () => {
+      window.removeEventListener("pointerdown", onFirstGesture);
+      window.removeEventListener("keydown", onFirstGesture);
+    };
+  }, []);
+
+  // make global helper functions
+  (window as any).SFX = {
+    click: () => clickRef.current?.play().catch(() => {}),
+    punch: () => playOneShot("/sounds/punch.wav", 0.9),
+    beep:  () => beepRef.current?.play().catch(() => {}),
+    mute:  (m: boolean) => {
+      [bgmRef, clickRef, punchRef, beepRef].forEach(r => {
+        if (r.current) r.current.muted = m;
+      });
+    },
+  };
+
+  return null; // this component doesn’t render anything visible
+}*/
