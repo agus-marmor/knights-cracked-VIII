@@ -39,18 +39,7 @@ export function initSocket(server, corsOrigin) {
   return io;
 }
 
-<<<<<<< HEAD
-=======
-
-
->>>>>>> refs/remotes/origin/main
 export function getIO() {
   if (!io) throw new Error("Socket.IO not initialized");
   return io;
 }
-<<<<<<< HEAD
-=======
-
-// Re-export controller-backed helpers
-export { startCountdown, emitMatchSnapshot };
->>>>>>> refs/remotes/origin/main

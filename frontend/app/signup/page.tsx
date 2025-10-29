@@ -18,7 +18,7 @@ export default function SignupPage() {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    // Basic Validation
+    // --- Basic Validation ---
     if (password !== confirmPassword) {
       setError("Passwords do not match");
       return;
@@ -32,16 +32,16 @@ export default function SignupPage() {
     setIsLoading(true);
 
     try {
-      // Create Account 
+      // --- Create Account ---
       await signup(username, email, password);
       
-      // Auto Login 
+      // --- Auto Login ---
       const loginData = await login(email, password); 
       
-      // Save Token 
+      // --- Save Token ---
       saveToken(loginData.token);
 
-      // Redirect to Dashboard 
+      // --- Redirect to Dashboard ---
       router.push("/dashboard"); 
 
     } catch (err: any) {
@@ -63,7 +63,7 @@ export default function SignupPage() {
         <h2 className="text-2xl font-semibold mb-6 tracking-wider text-center">SIGN UP</h2>
         
         <form onSubmit={handleSubmit}>
-          {/* Username Field */}
+          {/* --- Username Field --- */}
           <div className="mb-4">
             <label htmlFor="username" className="block text-xs font-semibold text-gray-300 mb-2 tracking-wider">USERNAME</label>
             <input
@@ -76,7 +76,7 @@ export default function SignupPage() {
             />
           </div>
 
-          {/* Email Field */}
+          {/* --- Email Field --- */}
           <div className="mb-4">
             <label htmlFor="email" className="block text-xs font-semibold text-gray-300 mb-2 tracking-wider">EMAIL</label>
             <input
@@ -89,7 +89,7 @@ export default function SignupPage() {
             />
           </div>
 
-          {/* Password Field */}
+          {/* --- Password Field --- */}
           <div className="mb-4">
             <label htmlFor="password" className="block text-xs font-semibold text-gray-300 mb-2 tracking-wider">PASSWORD</label>
             <input
@@ -102,7 +102,7 @@ export default function SignupPage() {
             />
           </div>
 
-          {/* Confirm Password Field */}
+          {/* --- Confirm Password Field --- */}
           <div className="mb-6">
             <label htmlFor="confirmPassword" className="block text-xs font-semibold text-gray-300 mb-2 tracking-wider">CONFIRM PASSWORD</label>
             <input
@@ -126,7 +126,7 @@ export default function SignupPage() {
           {error && <p className="text-red-500 text-sm mt-3 text-center">{error}</p>}
         </form>
 
-        {/* Link to Login Page */}
+        {/* --- Link to Login Page --- */}
         <div className="text-center mt-6 pt-4 border-t border-slate-700">
           <p className="text-sm text-gray-400">
             Already have an account?{" "}
