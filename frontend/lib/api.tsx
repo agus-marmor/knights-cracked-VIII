@@ -27,3 +27,29 @@ export async function signup(username: string, email: string, password: string) 
   }
   return res.json();
 }
+
+export async function createLobby(character: string) {
+  const res = await fetch("http://localhost:5000/api/createLobby", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ character, 2: Number}),
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const errorData = await res.json();
+    throw new Error(errorData.message || "Create Lobby failed");
+  }
+  return res.json();
+}
+
+export async function fetchUserProfile() {
+  const res = await fetch("http://localhost:5000/api/user/profile", {
+    method: "GET",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const errorData = await res.json();
+    throw new Error(errorData.message || "Fetch profile failed");
+  }
+  return res.json();
+}

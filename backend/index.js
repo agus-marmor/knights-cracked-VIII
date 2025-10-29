@@ -2,10 +2,12 @@
 import express from "express";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
+import http from "http";
 // index.js
 import cors from "cors";
 import authRoutes from "./routes/auth.routes.js";
 import lobbyRoutes from "./routes/lobby.routes.js";
+import { initSocket } from "./socket.js";
 
 dotenv.config();
 
@@ -25,6 +27,11 @@ app.use(express.json());               // body parser BEFORE routes
 // routes
 app.use("/api/auth", authRoutes);
 app.use("/api/lobbies", lobbyRoutes);
+
+
+// create HTTP server and attach Socket.IO
+const server = http.createServer(app);
+initSocket(server, process.env.FRONTEND_ORIGIN);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server on http://localhost:${PORT}`));

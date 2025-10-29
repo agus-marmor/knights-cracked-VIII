@@ -15,7 +15,7 @@ import {
 
 const r = Router();
 
-r.post("/", requireAuth, createLobby);
+r.post("/createLobby", requireAuth, createLobby);
 r.get("/:code", requireAuth, getLobby);
 r.post("/:code/join", requireAuth, joinLobby);
 r.post("/:code/leave", requireAuth, leaveLobby);
