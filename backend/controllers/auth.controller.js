@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
+
 const signToken = (user) =>
   jwt.sign(
     { id: user._id, email: user.email, username: user.username },
@@ -31,7 +32,7 @@ export const signup = async (req, res) => {
     const normalizedEmail = String(email).toLowerCase().trim();
     const normalizedUsername = String(username).toLowerCase().trim();
 
-    // Ensure uniqueness (email OR username)
+    // Ensure uniqueness for email or username
     const existing = await User.findOne({
       $or: [{ email: normalizedEmail }, { username: normalizedUsername }],
     });
@@ -99,5 +100,39 @@ export const login = async (req, res) => {
   } catch (err) {
     console.error("[login] error:", err);
     return res.status(500).json({ message: "Login failed" });
+  }
+};
+
+export const updatePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "currentPassword and newPassword are required." });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "New password must be at least 6 characters." });
+    }
+
+    // load user so we can compare/update password
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(401).json({ message: "User not found." });
+
+    const ok = await bcrypt.compare(currentPassword, user.password);
+    if (!ok) return res.status(401).json({ message: "Current password is incorrect." });
+
+    const sameAsOld = await bcrypt.compare(newPassword, user.password);
+    if (sameAsOld) {
+      return res.status(400).json({ message: "New password must be different from current password." });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    user.password = hash;
+    await user.save();
+
+    const token = signToken(user);
+    return res.json({ message: "Password updated.", token });
+  } catch (err) {
+    console.error("[updatePassword] error:", err);
+    return res.status(500).json({ message: "Failed to update password." });
   }
 };
