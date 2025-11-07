@@ -1,5 +1,6 @@
 import Match from "../models/Match.js";
-import { getIO } from "../socket.js";
+import User from "../models/User.js";
+// VS readiness sync removed for simplicity; rely on fixed VS delay only.
 
 export function publicMatchView(match) {
   // Ensure that we're working with a plain object
@@ -30,13 +31,16 @@ export function publicMatchView(match) {
   };
 }
 
+// Ephemeral VS acknowledgment tracking (in-memory per process)
+const vsAckMap = new Map(); // code(upcase) -> Set<userId>
+
 export async function emitMatchSnapshot(ioInstance, code, matchIdOrDoc) {
   const up = (code || "").toUpperCase();
   let match = null;
 
-  if (!matchIdOrDoc) { 
-    console.error("[emitMatchSnapshot] missing matchIdOrDoc"); 
-    return; 
+  if (!matchIdOrDoc) {
+    console.error("[emitMatchSnapshot] missing matchIdOrDoc");
+    return;
   }
 
   if (typeof matchIdOrDoc === "string") {
@@ -52,61 +56,87 @@ export async function emitMatchSnapshot(ioInstance, code, matchIdOrDoc) {
     return;
   }
 
-  ioInstance.to(`match:${up}`).emit("match:update", publicMatchView(match));
+  const view = publicMatchView(match);
+  ioInstance.to(`match:${up}`).emit("match:update", view);
 }
 
 // Handles the countdown and transition
-export async function startCountdown(ioInstance, code, matchId, secs = 3) {
+export async function startCountdown(ioInstance, code, matchId, secs = 3, vsMs = 6000) {
   const up = (code || "").toUpperCase();
   const room = `match:${up}`;
   let currentSecs = secs;
 
-  await emitMatchSnapshot(ioInstance, up, matchId);
+  console.log(`[startCountdown ${up}] Beginning VS phase, vsMs=${vsMs}`);
+  
+  // Initialize acknowledgment tracking
+  vsAckMap.set(up, new Set());
 
-  const timer = setInterval(async () => {
-    ioInstance.to(room).emit("match:countdown", { secs: currentSecs });
-    if (currentSecs-- <= 0) {
-      clearInterval(timer);
-      try {
-        const match = await Match.findByIdAndUpdate(
-          matchId,
-          { $set: { status: "playing", startedAt: new Date() } },
-          { new: true }
-        ).lean();
+  // Emit explicit VS event to all clients in the room
+  ioInstance.to(room).emit("match:vs", { vsMs, code: up });
+  console.log(`[startCountdown ${up}] Emitted match:vs event at t=${Date.now()}`);
 
-        if (match) {
-          ioInstance.to(room).emit("match:started", { startedAt: match.startedAt });
-          await emitMatchSnapshot(ioInstance, up, match);
-          console.log(`[Countdown] Match ${up} started, setting 120s timeout`);
-          setTimeout(() => hardFinish(ioInstance, up, matchId, "timeout"), 120000);
-        } else {
-          console.error(`[Countdown ${up}] Match not found after update`);
-        }
-      } catch (err) {
-        console.error(`[Countdown ${up}] Error starting match:`, err);
+  // Wait for vsMs duration (clients show VS overlay during this time)
+  setTimeout(async () => {
+    console.log(`[startCountdown ${up}] VS duration elapsed at t=${Date.now()}, transitioning to countdown`);
+    
+    // Clear VS acknowledgments
+    vsAckMap.delete(up);
+    
+    // Update match status to countdown
+    try {
+      const match = await Match.findByIdAndUpdate(
+        matchId,
+        { $set: { status: "countdown" } },
+        { new: true }
+      ).lean();
+      if (match) {
+        await emitMatchSnapshot(ioInstance, up, match);
+        console.log(`[startCountdown ${up}] Emitted COUNTDOWN snapshot at t=${Date.now()}`);
       }
+    } catch (e) {
+      console.error(`[VS->Countdown ${up}] transition error`, e);
     }
-  }, 1000);
-}
 
-export async function tryFinishMatch(io, matchDoc, code) {
+    // Buffer to account for GET READY screen on client (800ms) - minimal delay
+    const countdownDelayBuffer = 250;
+    setTimeout(() => {
+      console.log(`[startCountdown ${up}] Starting numeric ticks at t=${Date.now()}`);
+      const timer = setInterval(async () => {
+        ioInstance.to(room).emit("match:countdown", { secs: currentSecs });
+        if (currentSecs-- <= 0) {
+          clearInterval(timer);
+          try {
+            const match = await Match.findByIdAndUpdate(
+              matchId,
+              { $set: { status: "playing", startedAt: new Date() } },
+              { new: true }
+            ).lean();
+            if (match) {
+              ioInstance.to(room).emit("match:started", { startedAt: match.startedAt });
+              await emitMatchSnapshot(ioInstance, up, match);
+              console.log(`[Countdown] Match ${up} started, setting 120s timeout`);
+              setTimeout(() => hardFinish(ioInstance, up, matchId, "timeout"), 120000);
+            } else {
+              console.error(`[Countdown ${up}] Match not found after update`);
+            }
+          } catch (err) {
+            console.error(`[Countdown ${up}] Error starting match:`, err);
+          }
+        }
+      }, 1000);
+    }, countdownDelayBuffer);
+  }, vsMs);
+}export async function tryFinishMatch(io, matchDoc, code) {
   console.log("========================================");
   console.log(`[tryFinishMatch] CALLED for match ${code}`);
   console.log(`[tryFinishMatch] Status: ${matchDoc.status}`);
-  console.log(`[tryFinishMatch] Players:`, matchDoc.players.map(p => ({
-    username: p.username,
-    finished: p.finished,
-    charsTyped: p.charsTyped
-  })));
-  
+
   if (matchDoc.status !== "playing") {
     console.log(`[tryFinishMatch] Not playing, exiting`);
     return;
   }
 
   const finishedPlayers = matchDoc.players.filter(p => p.finished);
-  console.log(`[tryFinishMatch] Finished players: ${finishedPlayers.length}/${matchDoc.players.length}`);
-
   if (finishedPlayers.length === 0) {
     console.log(`[tryFinishMatch] No finished players yet`);
     return;
@@ -117,7 +147,7 @@ export async function tryFinishMatch(io, matchDoc, code) {
     return;
   }
 
-  // Determine winner
+  // Determine winner (based on your existing "race" logic)
   finishedPlayers.sort((a, b) => {
     const ta = a.finishedAt ? new Date(a.finishedAt).getTime() : Infinity;
     const tb = b.finishedAt ? new Date(b.finishedAt).getTime() : Infinity;
@@ -125,24 +155,42 @@ export async function tryFinishMatch(io, matchDoc, code) {
     if (b.accuracy !== a.accuracy) return b.accuracy - a.accuracy;
     return (b.wpm ?? 0) - (a.wpm ?? 0);
   });
-
   const winner = finishedPlayers[0];
   console.log(`[tryFinishMatch] Winner: ${winner.username}`);
-  
+
+  // Update match document
   matchDoc.winnerUserId = winner.userId;
   matchDoc.status = "finished";
   matchDoc.endedAt = new Date();
-  
   if (matchDoc.startedAt) {
     matchDoc.durationMs = matchDoc.endedAt.getTime() - new Date(matchDoc.startedAt).getTime();
   }
+
+
+  console.log(`[tryFinishMatch] Saving stats for ${matchDoc.players.length} players...`);
+  await Promise.all(matchDoc.players.map(async (player) => {
+    try {
+      const user = await User.findById(player.userId);
+      if (!user) {
+        console.error(`[tryFinishMatch] User ${player.userId} not found for stats`);
+        return;
+      }
+      // Use your User model's helper method
+      const didWin = String(player.userId) === String(matchDoc.winnerUserId);
+      user.applyMatchResult({ wpm: player.wpm || 0, didWin });
+      await user.save();
+      console.log(`[tryFinishMatch] Stats saved for ${user.username} (WPM: ${player.wpm || 0}, Win: ${didWin})`);
+    } catch (err) {
+      console.error(`[tryFinishMatch] Failed to save stats for ${player.userId}:`, err);
+    }
+  }));
 
   await matchDoc.save();
   console.log(`[tryFinishMatch] Match saved as finished`);
 
   const finishedSnapshot = publicMatchView(matchDoc);
   io.to(`match:${code}`).emit("match:finished", finishedSnapshot);
-  
+
   console.log(`[tryFinishMatch] *** BROADCASTED match:finished to match:${code} ***`);
   console.log("========================================");
 }
@@ -150,22 +198,23 @@ export async function tryFinishMatch(io, matchDoc, code) {
 export async function hardFinish(ioInstance, code, matchId, reason) {
   const up = (code || "").toUpperCase();
   console.log(`[hardFinish] Called for match ${up}, reason: ${reason}`);
-  
+
   try {
     const match = await Match.findById(matchId);
     if (!match) {
       console.error(`[hardFinish] Match ${matchId} not found`);
       return;
     }
-    
+
     if (match.status === "finished") {
       console.log(`[hardFinish] Match ${up} already finished`);
       return;
     }
 
-    finalizeResult(match, reason);
+    // 4. Await the finalizeResult function so stats are saved
+    await finalizeResult(match, reason);
     await match.save();
-    
+
     ioInstance.to(`match:${up}`).emit("match:finished", publicMatchView(match));
     console.log(`[hardFinish] Match ${up} finished and broadcasted`);
   } catch (err) {
@@ -173,10 +222,10 @@ export async function hardFinish(ioInstance, code, matchId, reason) {
   }
 }
 
-// Calculates final results and updates the match document (MUTATES matchDoc)
-function finalizeResult(matchDoc, reason) {
+
+async function finalizeResult(matchDoc, reason) { 
   console.log(`[finalizeResult] Finalizing match, reason: ${reason}`);
-  
+
   if (matchDoc.status === 'finished') {
     console.log(`[finalizeResult] Match already finished, skipping`);
     return matchDoc;
@@ -188,12 +237,12 @@ function finalizeResult(matchDoc, reason) {
     matchDoc.durationMs = matchDoc.endedAt.getTime() - matchDoc.startedAt.getTime();
   }
 
-  // Determine Winner 
+  // Determine Winner (your logic is unchanged)
   const finishedPlayers = matchDoc.players.filter(p => p.finished);
   let winner = null;
 
   if (finishedPlayers.length > 0) {
-    // Sort finished players: earliest finish, then accuracy, then WPM
+    // Sort finished players
     finishedPlayers.sort((a, b) => {
       const timeA = a.finishedAt?.getTime() ?? Infinity;
       const timeB = b.finishedAt?.getTime() ?? Infinity;
@@ -204,7 +253,7 @@ function finalizeResult(matchDoc, reason) {
     winner = finishedPlayers[0];
     console.log(`[finalizeResult] Winner by completion: ${winner.userId}`);
   } else if (reason === 'timeout' && matchDoc.players.length > 0) {
-    // If timeout, sort by chars typed, then accuracy, then WPM
+    // If timeout, sort by progress
     const sortedByProgress = [...matchDoc.players].sort((a, b) => {
       if ((b.charsTyped ?? 0) !== (a.charsTyped ?? 0)) return (b.charsTyped ?? 0) - (a.charsTyped ?? 0);
       if (b.accuracy !== a.accuracy) return b.accuracy - a.accuracy;
@@ -219,7 +268,27 @@ function finalizeResult(matchDoc, reason) {
 
   matchDoc.winnerUserId = winner?.userId ?? null;
   console.log(`[Finalize ${matchDoc.code}] Winner: ${matchDoc.winnerUserId || 'None'}. Reason: ${reason}`);
-  return matchDoc;
+
+  console.log(`[finalizeResult] Saving stats for ${matchDoc.players.length} players...`);
+  await Promise.all(matchDoc.players.map(async (player) => {
+    try {
+      const user = await User.findById(player.userId);
+      if (!user) {
+        console.error(`[finalizeResult] User ${player.userId} not found for stats`);
+        return;
+      }
+      
+      const didWin = String(player.userId) === String(matchDoc.winnerUserId);
+      user.applyMatchResult({ wpm: player.wpm || 0, didWin });
+      await user.save();
+      console.log(`[finalizeResult] Stats saved for ${user.username} (WPM: ${player.wpm || 0}, Win: ${didWin})`);
+    } catch (err) {
+      console.error(`[finalizeResult] Failed to save stats for ${player.userId}:`, err);
+    }
+  }));
+  
+
+  return matchDoc; // Return doc for caller to save
 }
 
 export async function handlePlayerProgress(ioInstance, code, payload) {

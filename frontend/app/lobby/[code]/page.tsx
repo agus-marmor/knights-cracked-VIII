@@ -268,7 +268,7 @@ export default function LobbyPage({
   // Main render when lobby data is available
   return (
     <div
-      className="flex flex-col items-center justify-center min-h-screen bg-gray-800 text-white p-4 bg-cover bg-center"
+      className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-6 bg-cover bg-center"
       style={{ backgroundImage: "url('/mainPage.jpg')" }}
     >
       {/* Leave Lobby Button */}
@@ -285,77 +285,104 @@ export default function LobbyPage({
         {!leavingLobby && <LogOut size={20} />}
       </Button>
 
+      {/* Header */}
+      <div className="mb-8 text-center">
+        <h1 className="text-5xl font-bold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-rose-400" style={{ fontFamily: "'Courier New', monospace" }}>
+          LOBBY ROOM
+        </h1>
+        <div className="inline-block bg-slate-900/90 px-6 py-2 rounded-full border-2 border-purple-500/60 shadow-lg backdrop-blur-sm">
+          <span className="text-sm text-purple-300 font-semibold tracking-wider" style={{ fontFamily: "'Courier New', monospace" }}>
+            CODE: <span className="text-yellow-400 font-bold text-lg">{lobbyCode}</span>
+          </span>
+        </div>
+      </div>
 
-      <h1 className="text-4xl font-bold mb-2 text-shadow-md">Lobby Room</h1>
-      <p className="text-lg mb-6 bg-black/30 px-3 py-1 rounded-md">
-        Code:{" "}
-        <span className="font-mono text-yellow-400 tracking-wider">{lobbyCode}</span>
-      </p>
-
-      <div className="w-full max-w-4xl p-6 bg-slate-900/80 rounded-lg shadow-xl border border-slate-700 backdrop-blur-sm">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start relative">
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            {/* Vs image*/}
-
-            <span className="text-4xl font-bold text-blue-400/70 text-shadow-lg hidden md:block">VS</span>
-          </div>
-
+      {/* Main container */}
+      <div className="w-full max-w-5xl">
+        {/* Players display */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
           {/* Pass player object identified by ID */}
           <PlayerPanel player={me} isMe={true} heroId={myHero} />
           <PlayerPanel player={other} isMe={false} />
         </div>
 
+        {/* VS Badge between players */}
+        <div className="flex justify-center -mt-16 mb-8 relative z-10">
+          <div className="bg-slate-900 px-8 py-3 rounded-full border-2 border-purple-500/60 shadow-lg backdrop-blur-sm">
+            <span className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-purple-400 to-rose-400" style={{ fontFamily: "'Courier New', monospace" }}>
+              VS
+            </span>
+          </div>
+        </div>
 
-        <div className="mt-8 flex flex-col items-center gap-3">
+        {/* Action buttons */}
+        <div className="flex flex-col items-center gap-4 bg-slate-900/80 backdrop-blur-sm rounded-xl border-2 border-slate-700 p-6 shadow-xl">
           {/* Waiting for opponent */}
           {!hasOpponent && (
-            <p className="text-gray-300 animate-pulse">Waiting for opponent to join…</p>
+            <div className="flex flex-col items-center gap-3 py-4">
+              <div className="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-cyan-300 font-semibold text-lg" style={{ fontFamily: "'Courier New', monospace" }}>
+                WAITING FOR OPPONENT...
+              </p>
+            </div>
           )}
 
           {/* Ready button */}
           {hasOpponent && !meReady && (
             <Button
-              color="primary"
+              color="success"
               variant="solid"
               size="lg"
               isLoading={sendingReady}
               onPress={onReady}
-              className="font-semibold shadow-lg"
+              className="font-bold text-lg px-12 py-6 shadow-lg shadow-emerald-500/30 border-2 border-emerald-400/50"
+              style={{ fontFamily: "'Courier New', monospace" }}
             >
-              {sendingReady ? "Setting ready…" : "I'm Ready"}
+              {sendingReady ? "SETTING READY..." : "I'M READY"}
             </Button>
           )}
 
           {/* Unready button */}
           {hasOpponent && meReady && (
-            <>
-              <p className="text-emerald-400 font-semibold flex items-center gap-2">
-                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
-                You're ready!
-              </p>
+            <div className="flex flex-col items-center gap-4 w-full">
+              <div className="flex items-center gap-3 bg-emerald-900/30 border border-emerald-500/50 rounded-lg px-6 py-3">
+                <span className="w-3 h-3 bg-emerald-400 rounded-full animate-pulse shadow-lg shadow-emerald-400/50"></span>
+                <p className="text-emerald-300 font-bold text-lg" style={{ fontFamily: "'Courier New', monospace" }}>
+                  YOU'RE READY!
+                </p>
+              </div>
+              
               {!otherReady && (
-                <p className="text-yellow-300 text-sm">Waiting for opponent…</p>
+                <div className="flex items-center gap-3 bg-yellow-900/20 border border-yellow-500/50 rounded-lg px-6 py-2">
+                  <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></div>
+                  <p className="text-yellow-300 text-sm font-semibold" style={{ fontFamily: "'Courier New', monospace" }}>
+                    WAITING FOR OPPONENT...
+                  </p>
+                </div>
               )}
+
               <Button
                 color="warning"
                 variant="bordered"
                 size="md"
                 isLoading={sendingReady}
                 onPress={onUnready}
-                className="font-semibold"
+                className="font-semibold border-2"
+                style={{ fontFamily: "'Courier New', monospace" }}
               >
-                {sendingReady ? "Updating…" : "Not Ready"}
+                {sendingReady ? "UPDATING..." : "NOT READY"}
               </Button>
-              {}
+
               {hasOpponent && (
                 <Button
-                  color="success"
+                  color="primary"
                   variant="solid"
+                  size="sm"
+                  className="mt-2"
                   onPress={async () => {
                     try {
                       const res = await startMatch(lobbyCode);
                       if (res.ok && res.matchId) {
-                        // wait 500ms to allow backend to save currentMatchId
                         setTimeout(() => router.push(`/match/${lobbyCode}`), 500);
                       }
                     } catch (e: any) {
@@ -367,7 +394,7 @@ export default function LobbyPage({
                   Start Match (Test)
                 </Button>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -377,42 +404,75 @@ export default function LobbyPage({
 
 
 function PlayerPanel({ player, isMe, heroId }: { player: LobbyPlayer | undefined, isMe: boolean, heroId?: string }) {
-  // Determine hero based on player data first, then fallback to prop if it's "me"
   const characterId = (player?.character || (isMe ? heroId : undefined) || "Kaiju").toLowerCase();
   const isReady = Boolean(player?.ready);
-  const hasPlayer = Boolean(player); // Only rely on player data now for opponent
+  const hasPlayer = Boolean(player);
   const displayName = isMe ? "You" : (player?.username || (hasPlayer ? "Opponent" : "Waiting..."));
 
-  return (
-    <div className={`bg-slate-900/80 rounded-xl border-2 p-6 flex flex-col items-center transition-all duration-300 ${isReady ? 'border-emerald-500 shadow-emerald-500/30 shadow-lg' : 'border-slate-700'} ${hasPlayer || isMe ? 'scale-100 opacity-100' : 'opacity-60 scale-95'}`}> {/* Improved ready state and empty state */}
-      <p className="text-gray-300 mb-2 font-semibold">{displayName}</p>
+  const borderColor = isMe ? 'border-cyan-500' : 'border-rose-500';
+  const gradientFrom = isMe ? 'from-cyan-900/30' : 'from-rose-900/30';
+  const accentColor = isMe ? 'text-cyan-300' : 'text-rose-300';
+  const readyBorderColor = isReady ? 'border-emerald-500 shadow-emerald-500/40' : borderColor;
 
-      <div className="w-40 h-40 sm:w-48 sm:h-48 flex items-center justify-center">
-        {hasPlayer || isMe ? ( // Show player hero even if waiting for opponent data
-          <img
-            src={heroSrc(characterId)}
-            alt={`${displayName}'s hero`}
-            className="max-w-full max-h-full object-contain drop-shadow-lg"
-          />
-        ) : ( // Only show placeholder for opponent if 'other' is truly undefined
-          <div className="w-full h-full flex items-center justify-center border-2 border-dashed border-slate-600 rounded-lg">
-            <span className="text-gray-400 text-sm">Join pending…</span>
+  return (
+    <div className={`relative bg-gradient-to-br ${gradientFrom} via-slate-900/50 to-slate-900/30 rounded-xl border-2 ${readyBorderColor} p-6 backdrop-blur-sm shadow-xl transition-all duration-300 ${hasPlayer || isMe ? 'scale-100 opacity-100' : 'opacity-60 scale-95'}`}>
+      {/* Corner accents */}
+      <div className={`absolute -top-1.5 -left-1.5 w-6 h-6 border-t-2 border-l-2 ${isMe ? 'border-cyan-400' : 'border-rose-400'} rounded-tl`} />
+      <div className={`absolute -top-1.5 -right-1.5 w-6 h-6 border-t-2 border-r-2 ${isMe ? 'border-cyan-400' : 'border-rose-400'} rounded-tr`} />
+      
+      {/* Player name */}
+      <div className="text-center mb-4">
+        <p className={`${accentColor} font-bold text-xl mb-1`} style={{ fontFamily: "'Courier New', monospace" }}>
+          {displayName}
+        </p>
+        <p className="text-gray-400 text-sm capitalize" style={{ fontFamily: "'Courier New', monospace" }}>
+          {characterId}
+        </p>
+      </div>
+
+      {/* Hero image */}
+      <div className="w-full aspect-square flex items-center justify-center mb-4 relative">
+        {hasPlayer || isMe ? (
+          <div className="relative w-full h-full">
+            {/* Glow effect */}
+            <div className={`absolute inset-0 ${isMe ? 'bg-cyan-500/20' : 'bg-rose-500/20'} rounded-lg blur-xl`} />
+            <img
+              src={heroSrc(characterId)}
+              alt={`${displayName}'s hero`}
+              className="relative w-full h-full object-contain drop-shadow-2xl"
+            />
+          </div>
+        ) : (
+          <div className="w-full h-full flex items-center justify-center border-2 border-dashed border-slate-600 rounded-lg bg-slate-800/50">
+            <div className="text-center">
+              <div className="w-12 h-12 mx-auto mb-2 border-2 border-slate-600 border-t-slate-400 rounded-full animate-spin"></div>
+              <span className="text-gray-400 text-sm font-semibold" style={{ fontFamily: "'Courier New', monospace" }}>
+                WAITING...
+              </span>
+            </div>
           </div>
         )}
       </div>
 
-      {(hasPlayer || isMe) && ( // Show hero name and ready status if we know the hero
-        <>
-          <p className="mt-3 text-lg font-semibold capitalize">
-            {characterId} {/* Display the determined character */}
-          </p>
-          {/* Only show ready status if player data actually exists */}
-          {player && (
-            <p className={`mt-2 text-sm font-medium ${isReady ? "text-emerald-400 animate-pulse" : "text-gray-400"}`}>
-              {isReady ? "Ready" : "Not ready"}
-            </p>
+      {/* Ready status */}
+      {player && (
+        <div className="text-center">
+          {isReady ? (
+            <div className="inline-flex items-center gap-2 bg-emerald-900/40 border border-emerald-500/60 rounded-full px-4 py-2">
+              <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse shadow-lg shadow-emerald-400/50"></span>
+              <span className="text-emerald-300 font-bold text-sm" style={{ fontFamily: "'Courier New', monospace" }}>
+                READY
+              </span>
+            </div>
+          ) : (
+            <div className="inline-flex items-center gap-2 bg-slate-800/60 border border-slate-600 rounded-full px-4 py-2">
+              <span className="w-2 h-2 bg-gray-500 rounded-full"></span>
+              <span className="text-gray-400 font-bold text-sm" style={{ fontFamily: "'Courier New', monospace" }}>
+                NOT READY
+              </span>
+            </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );
@@ -421,7 +481,7 @@ function PlayerPanel({ player, isMe, heroId }: { player: LobbyPlayer | undefined
 
 // Ensure this mapping is correct for your images
 function heroSrc(id: string) {
-  if (id === "kaiju") return "/hero2.png"; // Monster
-  if (id === "mech") return "/hero1.png"; // Robot
-  return "/hero2.png"; // Default or placeholder
+  if (id === "kaiju") return "/kaiju.png"; // Monster
+  if (id === "mech") return "/mech.png"; // Robot
+  return "/mech.png"; // Default or placeholder
 }

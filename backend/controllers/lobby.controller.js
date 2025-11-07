@@ -1,4 +1,3 @@
-// controllers/lobby.controller.js
 import crypto from "crypto";
 import Lobby from "../models/Lobby.js";
 import Match from "../models/Match.js";
@@ -315,9 +314,10 @@ export async function startMatch(req, res) {
     }
 
     // If something already started, reuse it
+    // Only reuse an already PLAYING match; never reuse a match still in countdown
     let active = await Match.findOne({
       code: upCode,
-      status: { $in: ["countdown", "playing"] },
+      status: { $in: ["playing"] },
     }).sort({ createdAt: -1 });
     const io = getIO();
 
@@ -326,13 +326,13 @@ export async function startMatch(req, res) {
       return res.status(200).json({ ok: true, message: "Match already active", gameId: upCode, matchId: active._id });
     }
 
-    // Create new match
+    // Create new match (initial VS phase)
     const promptText = makePrompt(10);
     console.log(promptText);
     active = await Match.create({
       code: upCode,
       lobbyId: lobby._id,
-      status: "countdown",
+      status: "vs", // initial VS phase
       promptText,
       players: lobby.players.map(p => ({
         userId: p.userId,
@@ -347,9 +347,14 @@ export async function startMatch(req, res) {
     await lobby.save();
 
     await emitLobbySnapshot(upCode);
-    io.to(`lobby:${upCode}`).emit("match:created", { code: upCode, matchId: active._id });
+    io.to(`lobby:${upCode}`).emit("match:created", { code: upCode, matchId: active._id, status: "vs" });
 
-    setTimeout(() => startCountdown(io, upCode, active._id), 800);
+    // Grace period to allow clients to subscribe to match room before startCountdown begins
+  const VS_PRE_SUBSCRIBE_GRACE_MS = 800;
+    setTimeout(() => {
+      console.log(`[startMatch ${upCode}] Invoking startCountdown after grace ${VS_PRE_SUBSCRIBE_GRACE_MS}ms`);
+      startCountdown(io, upCode, active._id);
+    }, VS_PRE_SUBSCRIBE_GRACE_MS);
 
     return res.status(200).json({ ok: true, message: "Match starting…", gameId: upCode, matchId: active._id });
   } catch (err) {

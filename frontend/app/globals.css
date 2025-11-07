@@ -26,3 +26,112 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes blink {
+  0%, 100% { background-color: #5dcff1; } /* caret color */
+  50% { background-color: transparent; }
+}
+
+.caret-char::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;    /* Adjust for vertical alignment */
+  bottom: 2px;   /* Adjust for vertical alignment */
+  width: 2px;
+  background-color: #5dcff1; /* caret color */
+  animation: blink 1.2s infinite;
+  z-index: 1;
+}
+
+/* ADD THIS NEW CSS to globals.css */
+
+.error-popup-char {
+  position: absolute;
+  top: 140%; /* Position it BELOW the character */
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #ef4444; /* red-500 */
+  color: white;
+  padding: 2px 8px; /* Made it a bit wider */
+  border-radius: 4px;
+  font-size: 14px; /* Made text a bit smaller */
+  font-weight: bold;
+  z-index: 10;
+  white-space: nowrap; /* Keep "typed: a" on one line */
+  
+  /* Simple pop-down animation */
+  animation: pop-down 0.1s ease-out;
+}
+
+/* This creates the small triangle pointing UP */
+.error-popup-char::after {
+  content: '';
+  position: absolute;
+  bottom: 100%; /* At the TOP of the pop-up */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 5px solid #ef4444; /* Same as the bg color */
+}
+
+@keyframes pop-down {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+
+/* MATCH ANIMATIONS */
+@keyframes key-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+@keyframes key-shake {
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-3px) rotate(-1deg); }
+  50% { transform: translateX(3px) rotate(1deg); }
+  75% { transform: translateX(-3px) rotate(-1deg); }
+  100% { transform: translateX(0); }
+}
+
+/* 2. Apply animations to your existing classes */
+.text-emerald-400 {
+  /* When a key is typed correctly, make it "pop" */
+  animation: key-pop 0.1s ease-out;
+}
+
+.text-rose-400 {
+  /* When a key is typed wrong, make it "shake" */
+  animation: key-shake 0.2s ease-in-out;
+}
+
+
+@keyframes idle-bob {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+  100% { transform: translateY(0); }
+}
+
+.animate-idle {
+  /* This will make the element bob up and down forever */
+  animation: idle-bob 2.5s ease-in-out infinite;
+}
+
+/* Grid scrolling animation for VS screen */
+@keyframes grid-scroll {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(40px); }
+}
+
+/* VS Screen - removed old simple style, now handled inline in component */

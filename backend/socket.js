@@ -18,6 +18,24 @@ import {
 console.log("[boot] JWT_SECRET len =", (process.env.JWT_SECRET || "").length);
 
 let io;
+// Track VS readiness signals per match code (in-memory)
+const vsReadyMap = new Map(); // code -> Set<userId>
+
+export function setVsReady(code, userId) {
+  const up = (code || "").toUpperCase();
+  if (!vsReadyMap.has(up)) vsReadyMap.set(up, new Set());
+  vsReadyMap.get(up).add(String(userId));
+}
+
+export function getVsReadyCount(code) {
+  const up = (code || "").toUpperCase();
+  return vsReadyMap.get(up)?.size || 0;
+}
+
+export function clearVsReady(code) {
+  const up = (code || "").toUpperCase();
+  vsReadyMap.delete(up);
+}
 
 export function initSocket(server, corsOrigin) {
   const allowlist = new Set([
@@ -106,6 +124,14 @@ export function initSocket(server, corsOrigin) {
       socket.currentMatchCode = lobbyCode;
       console.log(`[Socket Connect] User ${user.username} joined match room: ${matchRoom}`);
 
+      // Proactively emit a snapshot immediately on connection to minimize race with client subscribe
+      try {
+        await emitMatchSnapshot(io, lobbyCode, match);
+        console.log(`[Socket Connect] Emitted immediate snapshot for ${user.username}, status: ${match.status}`);
+      } catch (e) {
+        console.error(`[Socket Connect] Failed emitting immediate snapshot:`, e);
+      }
+
       // NOTE: do NOT return here — we still need to register event handlers (progress, finish, etc.)
       // Previously returning here prevented registration of listeners for match sockets and caused
       // client emits (match:finish) to time out.
@@ -163,8 +189,9 @@ export function initSocket(server, corsOrigin) {
           .lean();
 
         if (match) {
-          socket.emit("match:update", publicMatchView(match));
-          console.log(`[Match Subscribe] Sent match state to ${socket.username}, status: ${match.status}`);
+          // Use centralized emitter so late joiners also receive vsEndsAt if applicable
+          await emitMatchSnapshot(io, up, match);
+          console.log(`[Match Subscribe] Emitted snapshot for ${socket.username}, status: ${match.status}`);
         } else {
           socket.emit("match:update", null);
           console.log(`[Match Subscribe] No match found for code ${up}`);
@@ -172,6 +199,16 @@ export function initSocket(server, corsOrigin) {
       } catch (err) {
         console.error(`[Match Subscribe] Error:`, err);
         socket.emit("match:update", null);
+      }
+    });
+
+    // Client signals that VS overlay is displayed and ready
+    socket.on("match:vs-ready", ({ code }) => {
+      try {
+        // Optional: could track readiness here if needed for future sync
+        console.log(`[match:vs-ready] ${socket.username} ready for code ${code}`);
+      } catch (e) {
+        console.error("[match:vs-ready] error:", e);
       }
     });
 
@@ -258,7 +295,7 @@ export function initSocket(server, corsOrigin) {
         if (lobby) {
           console.log(`[Socket Disconnect] Player ${user.username} removed from lobby ${lobbyCode} players array.`);
           let hostTransferred = false;
-
+          
           if (lobby.hostUserId && String(lobby.hostUserId) === String(user.id) && lobby.players.length > 0) {
             lobby.hostUserId = lobby.players[0].userId;
             await lobby.save();
@@ -267,6 +304,7 @@ export function initSocket(server, corsOrigin) {
           }
 
           const finalLobbyState = hostTransferred ? await Lobby.findById(lobby._id).lean() : lobby.toObject();
+          const room = `lobby:${lobbyCode}`;
           io.to(room).emit("lobby:update", publicLobbyView(finalLobbyState));
           console.log(`[Socket Disconnect] Broadcasted lobbyUpdate for ${lobbyCode} after ${user.username} left.`);
 
