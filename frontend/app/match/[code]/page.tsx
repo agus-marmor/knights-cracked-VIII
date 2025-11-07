@@ -33,6 +33,13 @@ type MatchSnapshot = {
 
 const SOCKET_SERVER_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
 
+// Character image helper
+function heroSrc(id: string) {
+  if (id === "kaiju") return "/kaiju.png";
+  if (id === "mech") return "/mech.png";
+  return "/mech.png"; // Default
+}
+
 // helpers
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -1269,11 +1276,15 @@ export default function MatchPage() {
               <div className="flex items-center gap-4">
                 {/* Avatar/Character */}
                 <div className="relative flex-shrink-0">
-                  <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-cyan-500/30 to-cyan-600/20 border-2 border-cyan-400 flex items-center justify-center overflow-hidden shadow-lg">
+                  <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-cyan-500/20 to-cyan-600/10 border-2 border-cyan-400 flex items-center justify-center overflow-hidden shadow-lg">
                     {me?.character ? (
-                      <div className="text-4xl">{me.character}</div>
+                      <img 
+                        src={heroSrc(me.character.toLowerCase())}
+                        alt={me.character}
+                        className="w-full h-full object-contain p-1"
+                      />
                     ) : (
-                      <div className="text-cyan-300 font-bold text-sm tracking-wider" style={{ fontFamily: "'Courier New', monospace" }}>YOU</div>
+                      <div className="text-cyan-300 font-bold text-xs tracking-wider" style={{ fontFamily: "'Courier New', monospace" }}>YOU</div>
                     )}
                   </div>
                   {/* Level badge */}
@@ -1364,11 +1375,15 @@ export default function MatchPage() {
                 
                 {/* Avatar/Character */}
                 <div className="relative flex-shrink-0">
-                  <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-rose-500/30 to-rose-600/20 border-2 border-rose-400 flex items-center justify-center overflow-hidden shadow-lg">
+                  <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-rose-500/20 to-rose-600/10 border-2 border-rose-400 flex items-center justify-center overflow-hidden shadow-lg">
                     {opponent?.character ? (
-                      <div className="text-4xl">{opponent.character}</div>
+                      <img 
+                        src={heroSrc(opponent.character.toLowerCase())}
+                        alt={opponent.character}
+                        className="w-full h-full object-contain p-1"
+                      />
                     ) : (
-                      <div className="text-rose-300 font-bold text-sm tracking-wider" style={{ fontFamily: "'Courier New', monospace" }}>OPP</div>
+                      <div className="text-rose-300 font-bold text-xs tracking-wider" style={{ fontFamily: "'Courier New', monospace" }}>OPP</div>
                     )}
                   </div>
                   {/* Level badge */}
