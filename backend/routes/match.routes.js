@@ -9,6 +9,48 @@ import { getIO } from "../socket.js";
 
 const r = Router();
 
+// Get recent matches for current user
+r.get("/recent", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const limit = Math.min(Number(req.query.limit) || 5, 20);
+
+    // Find matches where user participated
+    const matches = await Match.find({
+      "players.userId": userId,
+      status: "finished"
+    })
+    .sort({ endedAt: -1 })
+    .limit(limit)
+    .lean();
+
+    // Format match data
+    const recentMatches = matches.map(match => {
+      const userPlayer = match.players.find(p => String(p.userId) === String(userId));
+      const opponent = match.players.find(p => String(p.userId) !== String(userId));
+      const won = String(match.winnerUserId) === String(userId);
+
+      return {
+        id: match._id,
+        code: match.code,
+        result: won ? 'win' : 'loss',
+        wpm: userPlayer?.wpm ?? 0,
+        accuracy: userPlayer?.accuracy ?? 100,
+        opponentUsername: opponent?.username ?? 'Unknown',
+        opponentWpm: opponent?.wpm ?? 0,
+        duration: match.durationMs,
+        endedAt: match.endedAt,
+        createdAt: match.createdAt
+      };
+    });
+
+    res.json(recentMatches);
+  } catch (err) {
+    console.error("[GET /recent] error:", err);
+    res.status(500).json({ message: "Failed to fetch recent matches" });
+  }
+});
+
 // prompt FIRST
 r.get("/:code/prompt", requireAuth, getMatchPrompt);
 

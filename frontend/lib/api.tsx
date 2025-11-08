@@ -275,3 +275,28 @@ export async function getMatchPrompt(code: string) {
   console.log("[getMatchPrompt] Received:", data);
   return data;
 }
+
+export async function getRecentMatches(limit: number = 5) {
+  const token = getToken();
+  if (!token) {
+    throw new Error("No auth token found");
+  }
+  const res = await fetch(
+    `http://localhost:5000/api/matches/recent?limit=${limit}`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "include",
+    }
+  );
+
+  if (!res.ok) {
+    const errorData = await res.json();
+    throw new Error(errorData.message || "Failed to fetch recent matches");
+  }
+
+  return res.json();
+}

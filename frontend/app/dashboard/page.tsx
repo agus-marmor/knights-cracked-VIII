@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getToken, logout } from "@/lib/auth";
-import { getUsername, createLobby, getLobby, joinLobby, fetchUserProfile, getLeaderboard } from "@/lib/api";
+import { getUsername, createLobby, getLobby, joinLobby, fetchUserProfile, getLeaderboard, getRecentMatches } from "@/lib/api";
 import { useAudio } from "@/lib/sfx";
 import { motion } from "framer-motion";
 
@@ -12,9 +12,24 @@ import {
   useDisclosure, Spinner
 } from "@heroui/react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Users, Gamepad2, Trophy, LogOut, Settings, User, Volume2, VolumeX } from "lucide-react"; 
+import { ChevronDown, Users, Gamepad2, Trophy, LogOut, Settings, User, Volume2, VolumeX, Target, Zap } from "lucide-react"; 
 import CreateLobbyForm from "@/app/components/createLobbyForm"; 
 import JoinLobbyForm from "@/app/components/joinLobbyForm";
+
+// Helper function to format time ago
+function formatTimeAgo(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - new Date(date).getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return new Date(date).toLocaleDateString();
+}
 
 type UserStats = {
   avgWPM: number;
@@ -43,11 +58,25 @@ type LeaderboardEntry = {
   winRate: number;
 };
 
+type RecentMatch = {
+  id: string;
+  code: string;
+  result: 'win' | 'loss';
+  wpm: number;
+  accuracy: number;
+  opponentUsername: string;
+  opponentWpm: number;
+  duration?: number;
+  endedAt: Date;
+  createdAt: Date;
+};
+
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [username, setUsername] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [recentMatches, setRecentMatches] = useState<RecentMatch[]>([]);
   const router = useRouter();
   const { playKeypressSound, isMuted, toggleMute } = useAudio(); 
   const {isOpen, onOpen, onOpenChange, onClose} = useDisclosure();
@@ -77,6 +106,10 @@ export default function DashboardPage() {
           // Fetch leaderboard
           const leaderboardData = await getLeaderboard();
           setLeaderboard(leaderboardData.slice(0, 5)); // Top 5 players
+
+          // Fetch recent matches
+          const matchesData = await getRecentMatches(5);
+          setRecentMatches(matchesData);
         } catch (error) {
           console.error("Failed to fetch dashboard data:", error);
           setUsername("User");
@@ -439,15 +472,74 @@ export default function DashboardPage() {
               <CardBody className="p-6">
                 <h3 className="text-lg font-bold text-gray-300 mb-4" style={{ fontFamily: "'Courier New', monospace" }}>RECENT MATCHES</h3>
                 <div className="space-y-3">
-                  <div className="bg-slate-800/60 rounded-lg p-4 border border-slate-700">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <p className="text-gray-400 text-xs">No recent matches</p>
-                        <p className="text-gray-500 text-xs mt-1">Play your first game!</p>
+                  {recentMatches.length > 0 ? (
+                    recentMatches.map((match, index) => (
+                      <motion.div
+                        key={match.id}
+                        className={`rounded-lg p-4 border ${
+                          match.result === 'win' 
+                            ? 'bg-emerald-900/20 border-emerald-500/40' 
+                            : 'bg-rose-900/20 border-rose-500/40'
+                        }`}
+                        initial={{ x: -30, opacity: 0 }}
+                        animate={{ x: 0, opacity: 1 }}
+                        transition={{ delay: 0.6 + index * 0.1 }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {/* Result icon */}
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                              match.result === 'win'
+                                ? 'bg-emerald-500/20 text-emerald-400'
+                                : 'bg-rose-500/20 text-rose-400'
+                            }`}>
+                              {match.result === 'win' ? (
+                                <Trophy size={20} />
+                              ) : (
+                                <Target size={20} />
+                              )}
+                            </div>
+                            
+                            {/* Match details */}
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className={`font-bold text-sm uppercase ${
+                                  match.result === 'win' ? 'text-emerald-300' : 'text-rose-300'
+                                }`} style={{ fontFamily: "'Courier New', monospace" }}>
+                                  {match.result === 'win' ? 'VICTORY' : 'DEFEAT'}
+                                </span>
+                                <span className="text-gray-500 text-xs">•</span>
+                                <span className="text-gray-400 text-xs">vs {match.opponentUsername}</span>
+                              </div>
+                              <div className="flex items-center gap-3 mt-1">
+                                <div className="flex items-center gap-1">
+                                  <Zap size={12} className="text-cyan-400" />
+                                  <span className="text-xs text-gray-300 font-semibold">{match.wpm} WPM</span>
+                                </div>
+                                <span className="text-gray-600 text-xs">•</span>
+                                <span className="text-xs text-gray-400">{match.accuracy}% ACC</span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Time ago */}
+                          <div className="text-xs text-gray-500">
+                            {formatTimeAgo(match.endedAt)}
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))
+                  ) : (
+                    <div className="bg-slate-800/60 rounded-lg p-4 border border-slate-700">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <p className="text-gray-400 text-xs">No recent matches</p>
+                          <p className="text-gray-500 text-xs mt-1">Play your first game!</p>
+                        </div>
+                        <Trophy size={24} className="text-gray-600" />
                       </div>
-                      <Trophy size={24} className="text-gray-600" />
                     </div>
-                  </div>
+                  )}
                 </div>
               </CardBody>
             </Card>
